@@ -1,0 +1,4 @@
+# Copie para .dev.vars somente para preview local do Worker.
+# Nunca faça commit de .dev.vars.
+SUPABASE_URL=https://seu-projeto.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=

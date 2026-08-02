@@ -37,6 +37,7 @@ export const uploadStartSchema = z.object({
   original_name: z.string().trim().min(1).max(255),
   mime_type: z.string().trim().min(1).max(120),
   size_bytes: z.number().int().positive(),
+  duration_ms: z.number().int().positive().optional(),
   sha256: sha256Schema,
   file_type: z.enum(["audio", "slides", "supplement"])
 });
@@ -104,4 +105,137 @@ export const questionSchema = z
         message: "A alternativa correta deve existir exatamente uma vez"
       });
     }
+    const alternativeIds = new Set(question.alternatives.map((item) => item.id));
+    const expectedIncorrect = new Set(
+      [...alternativeIds].filter((id) => id !== question.correct_alternative_id)
+    );
+    const explainedIncorrect = new Set(Object.keys(question.incorrect_explanations));
+    if (
+      expectedIncorrect.size !== explainedIncorrect.size ||
+      [...expectedIncorrect].some((id) => !explainedIncorrect.has(id))
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Todas e somente as alternativas incorretas precisam de explicação"
+      });
+    }
   });
+
+export const reviewIssueSchema = z
+  .object({
+    type: z.enum([
+      "unclear",
+      "technical_term",
+      "medical_term",
+      "number",
+      "dosage",
+      "proper_name",
+      "nonsense"
+    ]),
+    description: z.string().trim().min(1),
+    proposed_text: z.string().trim().min(1).nullable().optional()
+  })
+  .strict();
+
+export const reviewedSegmentSchema = z
+  .object({
+    segment_id: uuidSchema,
+    revised_text: z.string().trim().min(1),
+    needs_review: z.boolean(),
+    confidence: z.number().min(0).max(1),
+    issues: z.array(reviewIssueSchema)
+  })
+  .strict()
+  .superRefine((segment, context) => {
+    if (segment.needs_review !== segment.issues.length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "needs_review deve corresponder à existência de issues"
+      });
+    }
+  });
+
+export const reviewBatchSchema = z
+  .object({ segments: z.array(reviewedSegmentSchema).min(1) })
+  .strict();
+
+export const timestampReferenceSchema = z
+  .object({
+    timestamp_ms: z.number().int().nonnegative(),
+    source_segment_ids: z.array(uuidSchema).min(1)
+  })
+  .strict();
+
+export const summaryContentSchema = z
+  .object({
+    overview: z.string().trim().min(1),
+    concepts: z.array(z.string().trim().min(1)),
+    mechanisms: z.array(z.string().trim().min(1)),
+    classifications: z.array(z.string().trim().min(1)),
+    cause_and_effect: z.array(z.string().trim().min(1)),
+    teacher_examples: z.array(z.string().trim().min(1)),
+    emphasized_points: z.array(z.string().trim().min(1)),
+    traps: z.array(z.string().trim().min(1)),
+    exam_items: z.array(z.string().trim().min(1)),
+    references: z.array(timestampReferenceSchema)
+  })
+  .strict();
+
+export const flashcardsContentSchema = z
+  .object({ flashcards: z.array(flashcardSchema).min(1) })
+  .strict();
+
+export const questionsContentSchema = z
+  .object({ questions: z.array(questionSchema).min(1) })
+  .strict();
+
+export interface MindmapNodeContent {
+  id: string;
+  label: string;
+  children: MindmapNodeContent[];
+}
+
+export const mindmapNodeSchema: z.ZodType<MindmapNodeContent> = z.lazy(() =>
+  z
+    .object({
+      id: z.string().trim().min(1),
+      label: z.string().trim().min(1),
+      children: z.array(mindmapNodeSchema).default([])
+    })
+    .strict()
+);
+
+export const mindmapContentSchema = z
+  .object({
+    title: z.string().trim().min(1),
+    root: mindmapNodeSchema,
+    mermaid: z
+      .string()
+      .trim()
+      .max(20_000)
+      .startsWith("mindmap")
+      .refine((value) => !/[<>]/u.test(value) && !/\b(?:click|javascript:)\b/iu.test(value), {
+        message: "Mermaid contém construção não permitida"
+      })
+  })
+  .strict();
+
+export const notesSectionSchema = z
+  .object({
+    title: z.string().trim().min(1),
+    body: z.string().trim().min(1),
+    timestamp_ms: z.number().int().nonnegative(),
+    source_segment_ids: z.array(uuidSchema).min(1)
+  })
+  .strict();
+
+export const notesContentSchema = z
+  .object({
+    title: z.string().trim().min(1),
+    chronological_index: z.array(z.string().trim().min(1)),
+    sections: z.array(notesSectionSchema).min(1),
+    teacher_examples: z.array(z.string().trim().min(1)),
+    emphasized_points: z.array(z.string().trim().min(1)),
+    remaining_questions: z.array(z.string().trim().min(1))
+  })
+  .strict();

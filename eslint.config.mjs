@@ -7,9 +7,12 @@ export default tseslint.config(
   {
     ignores: [
       "**/.next/**",
+      "**/.open-next/**",
+      "**/.wrangler/**",
       "**/dist/**",
       "**/node_modules/**",
       "**/coverage/**",
+      "**/worker-configuration.d.ts",
       "supabase/.temp/**"
     ]
   },

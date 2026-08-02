@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { ClassCreateForm } from "@/components/class-create-form";
+import { getServerEnv } from "@/lib/env";
 
 export default async function NewClassPage({
   searchParams
@@ -15,16 +16,21 @@ export default async function NewClassPage({
     .eq("user_id", user.id)
     .order("name");
   const query = await searchParams;
+  const maxUploadBytes = getServerEnv().maxUploadBytes;
   return (
     <main className="mx-auto max-w-6xl px-5 py-9">
       <p className="font-bold text-[#176b58]">Nova aula</p>
       <h1 className="mt-1 text-4xl font-black">Envie a gravação</h1>
       <p className="mt-2 mb-8 text-[#61736f]">
-        O arquivo vai direto para o armazenamento privado; a chave da OpenAI nunca passa pelo
-        navegador.
+        O arquivo vai direto para o armazenamento privado; nenhum segredo de processamento passa
+        pelo navegador.
       </p>
       {data?.length ? (
-        <ClassCreateForm subjects={data} defaultSubject={query.subject} />
+        <ClassCreateForm
+          subjects={data}
+          defaultSubject={query.subject}
+          maxUploadBytes={maxUploadBytes}
+        />
       ) : (
         <div className="card p-8">Crie uma disciplina antes de cadastrar uma aula.</div>
       )}

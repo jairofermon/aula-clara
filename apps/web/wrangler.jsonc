@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "aula-clara",
+  "main": "./cloudflare-entry.ts",
+  "compatibility_date": "2026-08-02",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+    "run_worker_first": false
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "PROCESSING_QUEUE",
+        "queue": "aula-clara-processing"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "aula-clara-processing",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 4,
+        "dead_letter_queue": "aula-clara-processing-dlq"
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "secrets": {
+    "required": ["SUPABASE_SERVICE_ROLE_KEY"]
+  },
+  "vars": {
+    "SUPABASE_URL": "https://rctuenfnwlzmmpyjzhmq.supabase.co",
+    "PROCESSING_DISPATCH_MODE": "cloudflare",
+    "WORKER_ID": "aula-clara-cloudflare",
+    "WORKER_LOCK_TTL_SECONDS": "900",
+    "MAX_TRANSCRIPTION_CHUNK_MB": "15",
+    "CLOUDFLARE_TRANSCRIPTION_MODEL": "@cf/openai/whisper-large-v3-turbo",
+    "CLOUDFLARE_REVIEW_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
+    "CLOUDFLARE_GENERATION_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast"
+  }
+}

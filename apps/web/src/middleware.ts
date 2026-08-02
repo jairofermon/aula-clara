@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
-export async function proxy(request: NextRequest) {
+// Next.js 16 proxy.ts is Node-only. OpenNext ainda exige a fronteira Edge,
+// portanto mantemos deliberadamente a convenção middleware.ts suportada.
+export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
   const url = process.env.SUPABASE_INTERNAL_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

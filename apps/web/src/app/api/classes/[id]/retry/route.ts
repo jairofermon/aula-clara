@@ -1,4 +1,5 @@
 import { getApiContext } from "@/lib/auth";
+import { dispatchProcessingJob } from "@/cloudflare/job-dispatch";
 import { apiError } from "@/lib/http";
 import { ownsClass } from "@/lib/ownership";
 
@@ -36,5 +37,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .update({ status: "queued", current_stage: "Etapa reagendada", error_message: null })
     .eq("id", id)
     .eq("user_id", context.user.id);
+  try {
+    await dispatchProcessingJob(failed.id);
+  } catch {
+    console.error(JSON.stringify({ event: "processing_queue.dispatch_failed", job_id: failed.id }));
+  }
   return Response.json({ data: { job_id: failed.id, status: "pending" } }, { status: 202 });
 }

@@ -1,4 +1,5 @@
 import { getApiContext } from "@/lib/auth";
+import { dispatchProcessingJob } from "@/cloudflare/job-dispatch";
 import { apiError } from "@/lib/http";
 import { ownsClass } from "@/lib/ownership";
 
@@ -18,7 +19,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .maybeSingle();
   if (!audio) return apiError("Envie e conclua o áudio antes de iniciar.", 409, "audio_missing");
   const idempotencyKey = `prepare_audio:${id}:${audio.id}`;
-  const { data: job, error } = await context.supabase
+  const { data: insertedJob, error } = await context.supabase
     .from("processing_jobs")
     .upsert(
       {
@@ -35,6 +36,13 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .select("id,status")
     .maybeSingle();
   if (error) return apiError("Não foi possível registrar o processamento.", 500);
+  const { data: persistedJob } = insertedJob
+    ? { data: insertedJob }
+    : await context.supabase
+        .from("processing_jobs")
+        .select("id,status")
+        .eq("idempotency_key", idempotencyKey)
+        .single();
   await context.supabase
     .from("classes")
     .update({
@@ -50,7 +58,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     class_id: id,
     action: "processing.started",
     resource_type: "processing_job",
-    resource_id: job?.id
+    resource_id: persistedJob?.id
   });
-  return Response.json({ data: job ?? { status: "already_queued" } }, { status: 202 });
+  if (persistedJob?.id) {
+    try {
+      await dispatchProcessingJob(persistedJob.id);
+    } catch {
+      console.error(
+        JSON.stringify({ event: "processing_queue.dispatch_failed", job_id: persistedJob.id })
+      );
+    }
+  }
+  return Response.json({ data: persistedJob ?? { status: "already_queued" } }, { status: 202 });
 }

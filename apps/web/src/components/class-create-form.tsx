@@ -25,6 +25,46 @@ async function hashFile(file: File) {
   return hasher.digest("hex");
 }
 
+function mediaDurationMs(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const media = document.createElement(file.type.startsWith("video/") ? "video" : "audio");
+    const objectUrl = URL.createObjectURL(file);
+    let settled = false;
+    const timeout = window.setTimeout(
+      () => finish(new Error("Tempo esgotado ao ler o áudio.")),
+      15_000
+    );
+    function cleanup() {
+      window.clearTimeout(timeout);
+      media.onloadedmetadata = null;
+      media.onerror = null;
+      media.removeAttribute("src");
+      media.load();
+      URL.revokeObjectURL(objectUrl);
+    }
+    function finish(error?: Error) {
+      if (settled) return;
+      settled = true;
+      if (error) {
+        cleanup();
+        reject(error);
+        return;
+      }
+      const duration = media.duration;
+      cleanup();
+      if (!Number.isFinite(duration) || duration <= 0) {
+        reject(new Error("Não foi possível identificar a duração do áudio."));
+        return;
+      }
+      resolve(Math.round(duration * 1000));
+    }
+    media.preload = "metadata";
+    media.onloadedmetadata = () => finish();
+    media.onerror = () => finish(new Error("O navegador não conseguiu validar este áudio."));
+    media.src = objectUrl;
+  });
+}
+
 function putWithProgress(
   url: string,
   file: File,
@@ -49,10 +89,12 @@ function putWithProgress(
 
 export function ClassCreateForm({
   subjects,
-  defaultSubject
+  defaultSubject,
+  maxUploadBytes
 }: {
   subjects: Subject[];
   defaultSubject?: string;
+  maxUploadBytes: number;
 }) {
   const router = useRouter();
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -65,6 +107,8 @@ export function ClassCreateForm({
     file: File,
     fileType: "audio" | "slides" | "supplement"
   ) {
+    setUpload({ name: file.name, percent: 0, stage: "Validando duração e arquivo…" });
+    const durationMs = fileType === "audio" ? await mediaDurationMs(file) : undefined;
     setUpload({ name: file.name, percent: 0, stage: "Calculando hash com segurança…" });
     const sha256 = await hashFile(file);
     const start = await fetch("/api/uploads/start", {
@@ -75,6 +119,7 @@ export function ClassCreateForm({
         original_name: file.name,
         mime_type: file.type || "application/octet-stream",
         size_bytes: file.size,
+        ...(durationMs ? { duration_ms: durationMs } : {}),
         sha256,
         file_type: fileType
       })
@@ -118,6 +163,13 @@ export function ClassCreateForm({
     const supplements = form.getAll("supplements");
     if (!(audio instanceof File) || audio.size === 0) {
       setMessage("Selecione um arquivo de áudio.");
+      setBusy(false);
+      return;
+    }
+    if (audio.size > maxUploadBytes) {
+      setMessage(
+        `Na edição gratuita inicial, o áudio deve ter até ${Math.floor(maxUploadBytes / 1024 / 1024)} MB.`
+      );
       setBusy(false);
       return;
     }
@@ -248,6 +300,9 @@ export function ClassCreateForm({
               required
               accept=".m4a,.mp3,.wav,.mp4,.webm,audio/*,video/mp4,video/webm"
             />
+            <span className="mt-2 block text-xs text-[#61736f]">
+              Limite gratuito inicial: {Math.floor(maxUploadBytes / 1024 / 1024)} MB.
+            </span>
           </label>
           <label>
             <span className="label">Slides em PDF</span>

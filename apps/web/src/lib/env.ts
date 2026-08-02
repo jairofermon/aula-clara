@@ -22,6 +22,6 @@ export function getServerEnv() {
       .url()
       .parse(process.env.SUPABASE_INTERNAL_URL ?? publicEnv.NEXT_PUBLIC_SUPABASE_URL),
     signedUrlTtl: Number(process.env.SIGNED_URL_TTL_SECONDS ?? 300),
-    maxUploadBytes: Number(process.env.MAX_UPLOAD_SIZE_MB ?? 500) * 1024 * 1024
+    maxUploadBytes: Number(process.env.MAX_UPLOAD_SIZE_MB ?? 15) * 1024 * 1024
   };
 }

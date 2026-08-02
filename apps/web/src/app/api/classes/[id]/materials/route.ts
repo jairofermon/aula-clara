@@ -1,5 +1,6 @@
 import { materialRequestSchema } from "@aula-clara/shared";
 import { PROMPT_VERSIONS } from "@aula-clara/prompts";
+import { dispatchProcessingJob } from "@/cloudflare/job-dispatch";
 import { getApiContext } from "@/lib/auth";
 import { apiError, safeJson, validationError } from "@/lib/http";
 import { ownsClass } from "@/lib/ownership";
@@ -56,6 +57,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       "review_required"
     );
   const type = parsed.data.material_type;
+  const browserPdf = type === "pdf" && process.env.PROCESSING_DISPATCH_MODE === "cloudflare";
   let notesMaterialId: string | null = null;
   if (type === "pdf") {
     const { data: notes } = await context.supabase
@@ -74,14 +76,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const { data: latest } = await context.supabase
     .from("materials")
-    .select("version,status")
+    .select("id,material_type,version,status")
     .eq("class_id", id)
     .eq("material_type", type)
     .order("version", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (latest?.status === "pending" || latest?.status === "generating")
-    return Response.json({ data: latest }, { status: 202 });
+    return Response.json(
+      { data: { ...latest, ...(browserPdf ? { client_generation: true } : {}) } },
+      { status: 202 }
+    );
   const version = (latest?.version ?? 0) + 1;
   const jobType = type === "pdf" ? "generate_pdf" : `generate_${type}`;
   const promptKey = type === "pdf" ? "notes" : type;
@@ -95,30 +100,88 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       version,
       source_transcript_version: klass.transcript_version,
       prompt_version: PROMPT_VERSIONS[promptKey as keyof typeof PROMPT_VERSIONS],
-      model_name: "configured-by-worker"
+      model_name: browserPdf ? "pdf-lib-browser" : "configured-by-worker"
     })
     .select("id,material_type,status,version")
     .single();
   if (error || !material) return apiError("Não foi possível registrar o material.", 500);
-  const { error: jobError } = await context.supabase.from("processing_jobs").insert({
-    class_id: id,
-    user_id: context.user.id,
-    job_type: jobType,
-    status: "pending",
-    stage: "queued",
-    idempotency_key: `${jobType}:${id}:t${klass.transcript_version}:v${version}`,
-    input_json: {
-      material_id: material.id,
-      transcript_version: klass.transcript_version,
-      ...(notesMaterialId ? { notes_material_id: notesMaterialId } : {})
+  if (browserPdf) {
+    const now = new Date().toISOString();
+    const { data: browserJob, error: browserJobError } = await context.supabase
+      .from("processing_jobs")
+      .insert({
+        class_id: id,
+        user_id: context.user.id,
+        job_type: jobType,
+        status: "running",
+        stage: "awaiting_browser",
+        progress: 25,
+        attempt_count: 1,
+        max_attempts: 1,
+        locked_at: now,
+        locked_by: `browser:${context.user.id}`,
+        started_at: now,
+        idempotency_key: `${jobType}:${id}:t${klass.transcript_version}:v${version}`,
+        input_json: {
+          material_id: material.id,
+          transcript_version: klass.transcript_version,
+          notes_material_id: notesMaterialId
+        }
+      })
+      .select("id")
+      .single();
+    if (browserJobError || !browserJob) {
+      await context.supabase
+        .from("materials")
+        .delete()
+        .eq("id", material.id)
+        .eq("user_id", context.user.id);
+      return apiError("Não foi possível registrar a geração do PDF.", 500);
     }
-  });
-  if (jobError)
+    await context.supabase
+      .from("classes")
+      .update({ status: "generating_materials", current_stage: "Preparando PDF no navegador" })
+      .eq("id", id)
+      .eq("user_id", context.user.id);
+    return Response.json(
+      {
+        data: {
+          ...material,
+          processing_job_id: browserJob.id,
+          client_generation: true
+        }
+      },
+      { status: 202 }
+    );
+  }
+  const { data: job, error: jobError } = await context.supabase
+    .from("processing_jobs")
+    .insert({
+      class_id: id,
+      user_id: context.user.id,
+      job_type: jobType,
+      status: "pending",
+      stage: "queued",
+      idempotency_key: `${jobType}:${id}:t${klass.transcript_version}:v${version}`,
+      input_json: {
+        material_id: material.id,
+        transcript_version: klass.transcript_version,
+        ...(notesMaterialId ? { notes_material_id: notesMaterialId } : {})
+      }
+    })
+    .select("id")
+    .single();
+  if (jobError || !job)
     return apiError("O material foi registrado, mas a fila falhou. Use repetir etapa.", 500);
   await context.supabase
     .from("classes")
     .update({ status: "generating_materials", current_stage: `Gerando ${type}` })
     .eq("id", id)
     .eq("user_id", context.user.id);
+  try {
+    await dispatchProcessingJob(job.id);
+  } catch {
+    console.error(JSON.stringify({ event: "processing_queue.dispatch_failed", job_id: job.id }));
+  }
   return Response.json({ data: material }, { status: 202 });
 }

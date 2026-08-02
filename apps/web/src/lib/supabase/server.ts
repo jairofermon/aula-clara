@@ -13,7 +13,7 @@ export async function createClient() {
         try {
           items.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
         } catch {
-          // Server Components não podem escrever cookies; proxy.ts atualiza a sessão.
+          // Server Components não podem escrever cookies; middleware.ts atualiza a sessão.
         }
       }
     }

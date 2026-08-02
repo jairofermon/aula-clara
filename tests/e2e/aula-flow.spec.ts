@@ -1,8 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 
-test.skip(process.env.RUN_E2E !== "1", "E2E requer Supabase, web, FFmpeg e worker fake locais");
-
 function writeSineWave(path: string, durationSeconds = 4, sampleRate = 16_000) {
   const sampleCount = durationSeconds * sampleRate;
   const dataSize = sampleCount * 2;
@@ -29,6 +27,7 @@ function writeSineWave(path: string, durationSeconds = 4, sampleRate = 16_000) {
 }
 
 test("fluxo vertical: upload, transcrição, revisão e resumo", async ({ page }, testInfo) => {
+  test.skip(process.env.RUN_E2E !== "1", "E2E requer Supabase, web, FFmpeg e worker fake locais");
   const audioPath = testInfo.outputPath("aula-teste.wav");
   writeSineWave(audioPath);
   const email = `e2e-${Date.now()}@example.com`;

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { flashcardsToAnkiCsv, formatTimestamp, questionSchema, uploadStartSchema } from "../src";
+import {
+  flashcardsToAnkiCsv,
+  formatTimestamp,
+  questionSchema,
+  reviewBatchSchema,
+  uploadStartSchema
+} from "../src";
 
 describe("formatTimestamp", () => {
   it("formata minutos e horas", () => {
@@ -27,6 +33,28 @@ describe("schemas", () => {
       source_segment_ids: ["0f01c490-f3fd-49a7-af85-93d466fc8c21"]
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it("exige consistência entre pendência e issues na revisão", () => {
+    expect(
+      reviewBatchSchema.safeParse({
+        segments: [
+          {
+            segment_id: "0f01c490-f3fd-49a7-af85-93d466fc8c21",
+            revised_text: "Texto",
+            needs_review: false,
+            confidence: 0.7,
+            issues: [
+              {
+                type: "unclear",
+                description: "Trecho duvidoso",
+                proposed_text: null
+              }
+            ]
+          }
+        ]
+      }).success
+    ).toBe(false);
   });
 });
 

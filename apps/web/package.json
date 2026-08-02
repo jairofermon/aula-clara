@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:cloudflare": "opennextjs-cloudflare build",
+    "preview:cloudflare": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy:cloudflare": "opennextjs-cloudflare build && opennextjs-cloudflare deploy -- --secrets-file .secrets.production",
+    "cf:types": "wrangler types --env-interface CloudflareEnv",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -21,11 +25,13 @@
     "lucide-react": "1.28.0",
     "mermaid": "11.12.2",
     "next": "16.2.12",
+    "pdf-lib": "^1.17.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.2",
     "@tailwindcss/postcss": "4.3.3",
     "@types/dompurify": "3.0.5",
     "@types/node": "24.10.0",
@@ -34,6 +40,7 @@
     "eslint-config-next": "16.2.12",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "wrangler": "^4.118.0"
   }
 }

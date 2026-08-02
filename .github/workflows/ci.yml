@@ -1,0 +1,58 @@
+name: Qualidade
+
+on:
+  push:
+    branches: [master, "codex/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-public-placeholder
+      PROCESSING_DISPATCH_MODE: cloudflare
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/worker/pyproject.toml
+
+      - name: Instalar dependências TypeScript
+        run: pnpm install --frozen-lockfile
+
+      - name: Instalar worker Python
+        run: python -m pip install -e "services/worker[test]"
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Testes
+        run: pnpm test
+
+      - name: Build Next.js
+        run: pnpm build
+
+      - name: Build Cloudflare em Linux
+        run: pnpm --filter @aula-clara/web build:cloudflare

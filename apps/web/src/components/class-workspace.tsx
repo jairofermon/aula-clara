@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, Pause, Play, RotateCcw, Search, SkipForward } from "lucide-react";
 import {
@@ -11,8 +12,15 @@ import {
 } from "@aula-clara/shared";
 import { ProgressBar } from "@/components/progress-bar";
 import { STATUS_LABELS, statusTone } from "@/lib/status";
-import { MindmapView } from "@/components/mindmap-view";
 import { seekAudio } from "@/lib/player";
+
+const MindmapView = dynamic(
+  () => import("@/components/mindmap-view").then((module) => module.MindmapView),
+  {
+    ssr: false,
+    loading: () => <div className="skeleton h-64" aria-label="Carregando mapa mental" />
+  }
+);
 
 interface ClassInfo {
   id: string;
@@ -255,10 +263,61 @@ function MaterialsPanel({ classId }: { classId: string }) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ material_type })
     });
-    const body = (await response.json()) as { error?: { message: string } };
-    setMessage(
-      response.ok ? "Material colocado na fila." : (body.error?.message ?? "Falha ao gerar.")
-    );
+    const body = (await response.json()) as {
+      data?: { id: string; client_generation?: boolean };
+      error?: { message: string };
+    };
+    if (response.ok && body.data?.client_generation) {
+      try {
+        setMessage("Gerando o PDF no navegador…");
+        const start = await fetch(`/api/materials/${body.data.id}/pdf-upload`, { method: "POST" });
+        const startBody = (await start.json()) as {
+          data?: {
+            signed_url: string;
+            class_title: string;
+            subject_name: string;
+            class_date: string;
+            transcript_version: number;
+            notes: unknown;
+          };
+          error?: { message: string };
+        };
+        if (!start.ok || !startBody.data)
+          throw new Error(startBody.error?.message ?? "Não foi possível preparar o PDF.");
+        const { buildNotesPdf } = await import("@/lib/client-pdf");
+        const bytes = await buildNotesPdf({
+          classTitle: startBody.data.class_title,
+          subjectName: startBody.data.subject_name,
+          classDate: startBody.data.class_date,
+          transcriptVersion: startBody.data.transcript_version,
+          notes: startBody.data.notes
+        });
+        const upload = await fetch(startBody.data.signed_url, {
+          method: "PUT",
+          headers: { "content-type": "application/pdf", "x-upsert": "true" },
+          body: new Blob([Uint8Array.from(bytes)], { type: "application/pdf" })
+        });
+        if (!upload.ok) throw new Error("O PDF não chegou ao armazenamento privado.");
+        const complete = await fetch(`/api/materials/${body.data.id}/pdf-upload`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "complete" })
+        });
+        if (!complete.ok) throw new Error("Não foi possível confirmar o PDF.");
+        setMessage("PDF pronto para download.");
+      } catch (error) {
+        await fetch(`/api/materials/${body.data.id}/pdf-upload`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "fail" })
+        });
+        setMessage(error instanceof Error ? error.message : "Falha ao gerar o PDF.");
+      }
+    } else {
+      setMessage(
+        response.ok ? "Material colocado na fila." : (body.error?.message ?? "Falha ao gerar.")
+      );
+    }
     await load();
   }
   function exportCsv(material: Material) {
@@ -329,7 +388,7 @@ function MaterialsPanel({ classId }: { classId: string }) {
                     <Download size={17} aria-hidden /> CSV Anki
                   </button>
                 )}
-                {material.storage_path && (
+                {material.status === "completed" && material.storage_path && (
                   <a className="btn btn-primary" href={`/api/materials/${material.id}/download`}>
                     <Download size={17} aria-hidden /> Baixar
                   </a>

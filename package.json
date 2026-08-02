@@ -15,7 +15,7 @@
     "test": "pnpm -r test && pnpm test:python",
     "test:unit": "pnpm --filter @aula-clara/shared test && pnpm --filter @aula-clara/web test",
     "test:python": "python -m pytest services/worker/tests",
-    "test:e2e": "playwright test",
+    "test:e2e": "node node_modules/@playwright/test/cli.js test",
     "example:audio": "node scripts/generate-sample-audio.mjs",
     "format": "prettier --write \"apps/**/*.{ts,tsx,css,json,mjs}\" \"packages/**/*.{ts,json}\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"docs/**/*.md\" \"*.{md,json,yaml,yml,mjs,ts}\"",
     "format:check": "prettier --check \"apps/**/*.{ts,tsx,css,json,mjs}\" \"packages/**/*.{ts,json}\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"docs/**/*.md\" \"*.{md,json,yaml,yml,mjs,ts}\""
