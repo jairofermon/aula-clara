@@ -3,6 +3,7 @@ import { JobProcessingError, type ProcessingJob, processingQueueMessageSchema } 
 export interface QueueRepository {
   claim(jobId: string): Promise<ProcessingJob | null>;
   complete(jobId: string, output: Record<string, unknown>): Promise<void>;
+  continue(jobId: string, output: Record<string, unknown>): Promise<void>;
   fail(
     job: ProcessingJob,
     failure: {
@@ -18,6 +19,7 @@ export interface CloudJobProcessor {
   process(job: ProcessingJob): Promise<{
     output: Record<string, unknown>;
     nextJobIds?: string[];
+    continueJob?: boolean;
   }>;
 }
 
@@ -49,7 +51,7 @@ export async function consumeDelivery(
   repository: QueueRepository,
   processor: CloudJobProcessor,
   enqueue: (jobId: string) => Promise<void>
-): Promise<"completed" | "retried" | "ignored"> {
+): Promise<"completed" | "continued" | "retried" | "ignored"> {
   const message = processingQueueMessageSchema.safeParse(delivery.body);
   if (!message.success) {
     delivery.ack();
@@ -62,6 +64,12 @@ export async function consumeDelivery(
   }
   try {
     const result = await processor.process(job);
+    if (result.continueJob) {
+      await repository.continue(job.id, result.output);
+      await enqueue(job.id);
+      delivery.ack();
+      return "continued";
+    }
     await repository.complete(job.id, result.output);
     for (const nextJobId of result.nextJobIds ?? []) await enqueue(nextJobId);
     delivery.ack();

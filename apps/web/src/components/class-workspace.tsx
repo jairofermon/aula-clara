@@ -111,6 +111,16 @@ function SegmentCard({
   }, [dirty]);
 
   const openIssue = segment.issues?.find((issue) => issue.status === "open");
+  const needsHumanReview = segment.review_status === "needs_review" || Boolean(openIssue);
+  const reviewLabel = segment.user_confirmed
+    ? "Confirmado"
+    : needsHumanReview
+      ? "Conferência necessária"
+      : segment.review_status === "auto_reviewed"
+        ? "Revisado pela IA"
+        : segment.review_status === "user_edited"
+          ? "Editado por você"
+          : "Aguardando revisão";
   return (
     <article
       id={`segment-${segment.id}`}
@@ -137,13 +147,11 @@ function SegmentCard({
         <span className="text-xs text-[#61736f]" aria-live="polite">
           {saveState === "saving"
             ? "Salvando…"
-            : segment.user_confirmed
-              ? "Confirmado"
-              : saveState === "saved"
-                ? "Salvo"
-                : saveState === "error"
-                  ? "Falha ao salvar"
-                  : ""}
+            : saveState === "saved"
+              ? "Salvo"
+              : saveState === "error"
+                ? "Falha ao salvar"
+                : reviewLabel}
         </span>
       </div>
       <details className="mt-3">
@@ -170,28 +178,34 @@ function SegmentCard({
           {openIssue.proposed_text && <span> · Sugestão: “{openIssue.proposed_text}”</span>}
         </div>
       )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          className="btn btn-primary !min-h-9 !px-3 !py-1 text-sm"
-          onClick={() => void persist("confirm")}
-        >
-          Confirmar
-        </button>
-        <button
-          className="btn btn-secondary !min-h-9 !px-3 !py-1 text-sm"
-          onClick={() => void persist("keep_original", segment.raw_text)}
-        >
-          Manter original
-        </button>
-        {openIssue?.proposed_text && (
+      {needsHumanReview ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            className="btn btn-primary !min-h-9 !px-3 !py-1 text-sm"
+            onClick={() => void persist("confirm")}
+          >
+            Confirmar correção
+          </button>
           <button
             className="btn btn-secondary !min-h-9 !px-3 !py-1 text-sm"
-            onClick={() => void persist("accept_suggestion", openIssue.proposed_text ?? text)}
+            onClick={() => void persist("keep_original", segment.raw_text)}
           >
-            Aceitar sugestão
+            Manter original
           </button>
-        )}
-      </div>
+          {openIssue?.proposed_text && (
+            <button
+              className="btn btn-secondary !min-h-9 !px-3 !py-1 text-sm"
+              onClick={() => void persist("accept_suggestion", openIssue.proposed_text ?? text)}
+            >
+              Aceitar sugestão
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="mt-3 text-xs font-medium text-[#176b58]">
+          Nenhuma ação necessária. Edite apenas se quiser ajustar este trecho.
+        </p>
+      )}
     </article>
   );
 }
@@ -620,6 +634,10 @@ export function ClassWorkspace({
               <SkipForward size={17} aria-hidden /> Próximo problema
             </button>
           </div>
+          <p className="mb-4 text-sm text-[#61736f]">
+            Trechos sem alerta são aprovados automaticamente. Confira apenas as pendências
+            destacadas.
+          </p>
           {filtered.length ? (
             <VirtualTranscript
               segments={filtered}

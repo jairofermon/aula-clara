@@ -12,13 +12,23 @@ function cloudflareEnv(response: unknown): CloudflareEnv {
   } as unknown as CloudflareEnv;
 }
 
+const transcript = [
+  {
+    segment_id: "00000000-0000-4000-8000-000000000001",
+    start_ms: 0,
+    end_ms: 1000,
+    speaker_label: null,
+    text: "A fotossíntese transforma energia luminosa em energia química."
+  }
+] as const;
+
 describe("conteúdo estruturado do Workers AI", () => {
-  it("rejeita revisão que troca o ID do segmento", async () => {
+  it("rejeita revisão que troca o índice do segmento", async () => {
     const env = cloudflareEnv({
       response: {
         segments: [
           {
-            segment_id: "00000000-0000-4000-8000-000000000099",
+            index: 99,
             revised_text: "Texto revisado.",
             needs_review: false,
             confidence: 0.9,
@@ -79,5 +89,34 @@ describe("conteúdo estruturado do Workers AI", () => {
         { title: "Aula" }
       )
     ).rejects.toMatchObject({ code: "material_source_mismatch" });
+  });
+
+  it("aceita JSON válido cercado por bloco de código", async () => {
+    const env = cloudflareEnv({
+      response: `\`\`\`json
+{"overview":"Visão geral","concepts":["Fotossíntese"],"mechanisms":[],"classifications":[],"cause_and_effect":[],"teacher_examples":[],"emphasized_points":[],"traps":[],"exam_items":[],"references":[{"timestamp_ms":0,"source_segment_ids":["00000000-0000-4000-8000-000000000001"]}]}
+\`\`\``
+    });
+
+    await expect(
+      generateWithWorkersAi(env, "summary", transcript, { title: "Aula" })
+    ).resolves.toMatchObject({ data: { overview: "Visão geral" } });
+  });
+
+  it("usa json_object nos materiais com schemas complexos", async () => {
+    const env = cloudflareEnv({
+      response: {
+        title: "Fotossíntese",
+        root: { id: "root", label: "Fotossíntese", children: [] },
+        mermaid: "mindmap\n  root((Fotossíntese))"
+      }
+    });
+
+    await generateWithWorkersAi(env, "mindmap", transcript, { title: "Aula" });
+
+    expect(env.AI.run).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ response_format: { type: "json_object" } })
+    );
   });
 });

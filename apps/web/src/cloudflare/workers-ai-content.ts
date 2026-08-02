@@ -3,7 +3,7 @@ import {
   mindmapContentSchema,
   notesContentSchema,
   questionsContentSchema,
-  reviewBatchSchema,
+  reviewIssueSchema,
   summaryContentSchema
 } from "@aula-clara/shared";
 import { REVIEW_RULES } from "@aula-clara/prompts";
@@ -17,11 +17,41 @@ interface StructuredResult<T> {
   requestId?: string;
 }
 
+const indexedReviewedSegmentSchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    revised_text: z.string().trim().min(1),
+    needs_review: z.boolean(),
+    confidence: z.number().min(0).max(1),
+    issues: z.array(reviewIssueSchema)
+  })
+  .strict()
+  .superRefine((segment, context) => {
+    if (segment.needs_review !== segment.issues.length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "needs_review deve corresponder à existência de issues"
+      });
+    }
+  });
+
+const indexedReviewBatchSchema = z
+  .object({ segments: z.array(indexedReviewedSegmentSchema).min(1) })
+  .strict();
+
 function parseJsonValue(value: unknown): unknown {
   if (typeof value !== "string") return value;
   try {
     return JSON.parse(value) as unknown;
   } catch {
+    const fenced = value.match(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/iu)?.[1];
+    if (fenced) {
+      try {
+        return JSON.parse(fenced) as unknown;
+      } catch {
+        // Fall through to the same validated provider error used for plain JSON.
+      }
+    }
     throw new JobProcessingError(
       "invalid_provider_json",
       "O modelo retornou JSON inválido. Uma nova tentativa será feita.",
@@ -35,19 +65,25 @@ async function runStructured<T>(
   model: string,
   schema: z.ZodType<T>,
   system: string,
-  payload: unknown
+  payload: unknown,
+  jsonObjectMode = false
 ): Promise<StructuredResult<T>> {
   let raw: unknown;
   try {
+    const jsonSchema = z.toJSONSchema(schema);
     raw = await env.AI.run(model, {
       messages: [
-        { role: "system", content: system },
+        {
+          role: "system",
+          content: jsonObjectMode
+            ? `${system} Responda somente com um objeto JSON válido que satisfaça rigorosamente este JSON Schema: ${JSON.stringify(jsonSchema)}`
+            : system
+        },
         { role: "user", content: JSON.stringify(payload) }
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: z.toJSONSchema(schema)
-      },
+      response_format: jsonObjectMode
+        ? { type: "json_object" }
+        : { type: "json_schema", json_schema: jsonSchema },
       temperature: 0.1,
       max_tokens: 6000
     });
@@ -101,16 +137,23 @@ export async function reviewWithWorkersAi(
   const result = await runStructured(
     env,
     env.CLOUDFLARE_REVIEW_MODEL,
-    reviewBatchSchema,
-    `${REVIEW_RULES} Preserve exatamente todos os segment_id recebidos. needs_review deve ser verdadeiro se e somente se issues não estiver vazia. Não use HTML.`,
-    { segments, context: context.slice(0, 8000) }
+    indexedReviewBatchSchema,
+    `${REVIEW_RULES} Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. needs_review deve ser verdadeiro se e somente se issues não estiver vazia. Não use HTML.`,
+    {
+      segments: segments.map((segment, index) => ({
+        index,
+        raw_text: segment.raw_text,
+        start_ms: segment.start_ms,
+        end_ms: segment.end_ms
+      })),
+      context: context.slice(0, 8000)
+    }
   );
-  const expected = new Set(segments.map((segment) => segment.segment_id));
-  const returned = result.data.segments.map((segment) => segment.segment_id);
+  const returned = result.data.segments.map((segment) => segment.index);
   if (
-    returned.length !== expected.size ||
+    returned.length !== segments.length ||
     new Set(returned).size !== returned.length ||
-    returned.some((id) => !expected.has(id))
+    returned.some((index) => index < 0 || index >= segments.length)
   ) {
     throw new JobProcessingError(
       "review_segment_ids_mismatch",
@@ -118,7 +161,17 @@ export async function reviewWithWorkersAi(
       true
     );
   }
-  return result;
+  return {
+    ...result,
+    data: {
+      segments: [...result.data.segments]
+        .sort((left, right) => left.index - right.index)
+        .map(({ index, ...segment }) => ({
+          ...segment,
+          segment_id: segments[index]!.segment_id
+        }))
+    }
+  };
 }
 
 const materialSchemas = {
@@ -182,7 +235,8 @@ export async function generateWithWorkersAi(
     env.CLOUDFLARE_GENERATION_MODEL,
     schema,
     "Gere material de estudo em português usando exclusivamente a transcrição validada. Preserve timestamps em milissegundos e IDs de origem. Não use HTML. Em questões, gere cinco alternativas distintas, exatamente uma correta e explique todas. No Mermaid, use somente mindmap com labels de texto simples.",
-    { class: classContext, transcript }
+    { class: classContext, transcript },
+    materialType === "questions" || materialType === "mindmap"
   );
   verifySourceReferences(
     result.data,

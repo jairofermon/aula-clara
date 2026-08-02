@@ -26,9 +26,9 @@ Invariantes:
 - corrigir somente pontuação, português evidente e termos com confiança;
 - marcar nomes, números, dosagens, termos técnicos e trechos sem sentido;
 - `needs_review=true` exatamente quando existem issues;
-- retornar todos os IDs do lote uma vez.
+- retornar todos os índices curtos do lote uma vez; o servidor os associa aos IDs imutáveis.
 
-`ReviewBatch` valida a resposta. IDs ausentes, extras ou duplicados causam falha integral do job; nada é salvo parcialmente. No caminho Cloudflare, uma RPC aplica o lote em transação única. `raw_text` permanece imutável.
+`ReviewBatch` valida a resposta. Índices ausentes, extras ou duplicados rejeitam integralmente aquela resposta; nada dela é salvo parcialmente. No caminho Cloudflare, o worker subdivide automaticamente um lote inconsistente e cada nova resposta válida é associada aos IDs reais e aplicada por uma RPC transacional. Trechos sem issues seguem como `auto_reviewed`, sem confirmação manual; somente `needs_review` exige ação humana. `raw_text` permanece imutável.
 
 ## Contexto
 

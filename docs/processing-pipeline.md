@@ -82,7 +82,11 @@ Título, disciplina, professor, glossário e texto extraído dos slides formam u
 
 ## Revisão
 
-Segmentos são enviados em lotes com IDs imutáveis. A resposta passa por schema Zod/Pydantic estrito. O lote inteiro é descartado se houver ID ausente/desconhecido, duplicação, campo extra inválido ou valor fora de faixa.
+Segmentos são enviados em lotes de até 24 itens. Para evitar que o modelo copie incorretamente UUIDs longos, cada chamada usa índices curtos e ordenados; o servidor associa os índices de volta aos IDs imutáveis. A resposta passa por schema Zod/Pydantic estrito. O lote inteiro é descartado se houver índice ausente/desconhecido, duplicação, campo extra inválido ou valor fora de faixa. Quando o modelo não preserva todos os índices ou devolve JSON/schema inválido, o worker subdivide o lote recursivamente e valida cada novo lote antes de persistir, evitando repetir trechos já revisados.
+
+Para aulas longas, cada entrega da Queue processa no máximo dez lotes. O worker então persiste uma continuação, libera o lock e reenfileira o mesmo `job_id` sem contabilizar a continuação como falha. O cron consulta jobs pendentes, retries vencidos e jobs `running`; a função transacional de claim só aceita estes últimos quando o lock expirou. Assim, ele continua sendo a rede de segurança caso a nova mensagem não seja entregue ou um worker seja interrompido.
+
+Trechos revisados sem alerta recebem `auto_reviewed` e não exigem confirmação manual. Somente segmentos classificados como `needs_review`, com uma pendência aberta, interrompem o fluxo para conferência humana. O usuário ainda pode editar qualquer trecho aprovado automaticamente; a edição é salva como `user_edited`.
 
 `raw_text` nunca é alterado. `revised_text`, confiança, status e issues são gravados na mesma transação. A aula entra em `needs_user_review` quando houver issue aberta; caso contrário fica pronta para materiais.
 

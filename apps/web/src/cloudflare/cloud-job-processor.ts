@@ -58,6 +58,13 @@ function rpcFailure(errorCode: string): never {
   throw new JobProcessingError(errorCode, message, transient);
 }
 
+type ReviewSegmentInput = {
+  segment_id: string;
+  raw_text: string;
+  start_ms: number;
+  end_ms: number;
+};
+
 function classifyAiError(error: unknown): JobProcessingError {
   const details = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
   if (details.includes("3036") || details.includes("daily free allocation")) {
@@ -226,18 +233,14 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     };
   }
 
-  private async reviewTranscript(job: ProcessingJob) {
-    let reviewed = 0;
-    let needsReview = 0;
-    for (let batchNumber = 0; batchNumber < 50; batchNumber += 1) {
-      const input = reviewInputSchema.parse(await this.repository.reviewBatch(job.id));
-      if ("error_code" in input) rpcFailure(input.error_code);
-      if (!input.segments.length) {
-        return { output: { reviewed, needs_review: needsReview, resumed: reviewed === 0 } };
-      }
-
-      const startedAt = Date.now();
-      const result = await reviewWithWorkersAi(this.env, input.segments, input.context);
+  private async applyReviewSegments(
+    job: ProcessingJob,
+    segments: ReviewSegmentInput[],
+    context: string
+  ): Promise<{ applied: number; remaining: number; needs_review: number }> {
+    const startedAt = Date.now();
+    try {
+      const result = await reviewWithWorkersAi(this.env, segments, context);
       const applied = applyReviewResultSchema.parse(
         await this.repository.applyReviewBatch(
           job.id,
@@ -252,17 +255,50 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
         )
       );
       if ("error_code" in applied) rpcFailure(applied.error_code);
+      return applied;
+    } catch (error) {
+      const canSplit =
+        error instanceof JobProcessingError &&
+        [
+          "review_segment_ids_mismatch",
+          "invalid_provider_json",
+          "invalid_provider_schema"
+        ].includes(error.code);
+      if (!canSplit || segments.length === 1) {
+        throw error;
+      }
+      const middle = Math.ceil(segments.length / 2);
+      const first = await this.applyReviewSegments(job, segments.slice(0, middle), context);
+      const second = await this.applyReviewSegments(job, segments.slice(middle), context);
+      return {
+        applied: first.applied + second.applied,
+        remaining: second.remaining,
+        needs_review: second.needs_review
+      };
+    }
+  }
+
+  private async reviewTranscript(job: ProcessingJob) {
+    let reviewed = 0;
+    let needsReview = 0;
+    for (let batchNumber = 0; batchNumber < 10; batchNumber += 1) {
+      const input = reviewInputSchema.parse(await this.repository.reviewBatch(job.id));
+      if ("error_code" in input) rpcFailure(input.error_code);
+      if (!input.segments.length) {
+        return { output: { reviewed, needs_review: needsReview, resumed: reviewed === 0 } };
+      }
+
+      const applied = await this.applyReviewSegments(job, input.segments, input.context);
       reviewed += applied.applied;
       needsReview = applied.needs_review;
       if (applied.remaining === 0) {
         return { output: { reviewed, needs_review: needsReview, resumed: false } };
       }
     }
-    throw new JobProcessingError(
-      "review_batch_limit",
-      "A transcrição excedeu o limite de revisão desta execução e será retomada.",
-      true
-    );
+    return {
+      output: { reviewed, needs_review: needsReview, resumed: false, continuing: true },
+      continueJob: true
+    };
   }
 
   private async generateMaterial(job: ProcessingJob, materialType: GeneratableMaterial) {

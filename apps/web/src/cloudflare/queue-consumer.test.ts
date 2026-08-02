@@ -28,7 +28,7 @@ describe("consumidor da fila Cloudflare", () => {
     const enqueue = vi.fn().mockResolvedValue(undefined);
     const result = await consumeDelivery(
       item,
-      { claim: vi.fn().mockResolvedValue(job), complete, fail: vi.fn() },
+      { claim: vi.fn().mockResolvedValue(job), complete, continue: vi.fn(), fail: vi.fn() },
       {
         process: vi.fn().mockResolvedValue({ output: { ok: true }, nextJobIds: [job.class_id] })
       },
@@ -41,6 +41,30 @@ describe("consumidor da fila Cloudflare", () => {
     expect(item.retry).not.toHaveBeenCalled();
   });
 
+  it("libera e reenfileira uma continuação sem concluir o job", async () => {
+    const item = delivery({ job_id: job.id });
+    const complete = vi.fn();
+    const continueJob = vi.fn().mockResolvedValue(undefined);
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+    const result = await consumeDelivery(
+      item,
+      {
+        claim: vi.fn().mockResolvedValue(job),
+        complete,
+        continue: continueJob,
+        fail: vi.fn()
+      },
+      { process: vi.fn().mockResolvedValue({ output: { reviewed: 240 }, continueJob: true }) },
+      enqueue
+    );
+
+    expect(result).toBe("continued");
+    expect(continueJob).toHaveBeenCalledWith(job.id, { reviewed: 240 });
+    expect(complete).not.toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledWith(job.id);
+    expect(item.ack).toHaveBeenCalledOnce();
+  });
+
   it("agenda backoff para falha temporária", async () => {
     const item = delivery({ job_id: job.id });
     const result = await consumeDelivery(
@@ -48,6 +72,7 @@ describe("consumidor da fila Cloudflare", () => {
       {
         claim: vi.fn().mockResolvedValue(job),
         complete: vi.fn(),
+        continue: vi.fn(),
         fail: vi.fn().mockResolvedValue("retry_wait")
       },
       { process: vi.fn().mockRejectedValue(new Error("interrompido")) },
@@ -63,6 +88,7 @@ describe("consumidor da fila Cloudflare", () => {
     const repository = {
       claim: vi.fn().mockResolvedValue(null),
       complete: vi.fn(),
+      continue: vi.fn(),
       fail: vi.fn()
     };
     expect(await consumeDelivery(invalid, repository, { process: vi.fn() }, vi.fn())).toBe(

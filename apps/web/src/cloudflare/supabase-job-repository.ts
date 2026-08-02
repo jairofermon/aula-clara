@@ -70,7 +70,7 @@ export class SupabaseJobRepository implements QueueRepository {
     });
   }
 
-  async reviewBatch(jobId: string, limit = 12): Promise<unknown> {
+  async reviewBatch(jobId: string, limit = 24): Promise<unknown> {
     return this.rpc("get_cloud_review_batch", {
       p_job_id: jobId,
       p_worker_id: this.env.WORKER_ID,
@@ -160,6 +160,14 @@ export class SupabaseJobRepository implements QueueRepository {
     });
   }
 
+  async continue(jobId: string, output: Record<string, unknown>): Promise<void> {
+    await this.rpc("continue_processing_job", {
+      p_job_id: jobId,
+      p_worker_id: this.env.WORKER_ID,
+      p_output: output
+    });
+  }
+
   async fail(
     job: ProcessingJob,
     failure: {
@@ -185,7 +193,7 @@ export class SupabaseJobRepository implements QueueRepository {
   async readyJobIds(limit = 20): Promise<string[]> {
     const query = new URLSearchParams({
       select: "id",
-      status: "in.(pending,retry_wait)",
+      status: "in.(pending,retry_wait,running)",
       next_attempt_at: `lte.${new Date().toISOString()}`,
       order: "next_attempt_at.asc,created_at.asc",
       limit: String(limit)
