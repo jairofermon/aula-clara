@@ -1,0 +1,46 @@
+name: aula-clara
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    env_file: .env
+    environment:
+      SUPABASE_INTERNAL_URL: http://host.docker.internal:54321
+    ports:
+      - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    env_file: .env
+    environment:
+      SUPABASE_INTERNAL_URL: http://host.docker.internal:54321
+      SUPABASE_DB_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  worker-api:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    env_file: .env
+    environment:
+      SUPABASE_INTERNAL_URL: http://host.docker.internal:54321
+      SUPABASE_DB_URL: postgresql://postgres:postgres@host.docker.internal:54322/postgres
+    command: ["uvicorn", "aula_clara_worker.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    profiles: ["diagnostics"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

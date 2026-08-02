@@ -1,0 +1,61 @@
+# Prompts e respostas estruturadas
+
+## Objetivo
+
+Prompts são tratados como interfaces versionadas. O texto gerado nunca é autoridade sobre IDs, tempos, permissões ou estado da fila; esses valores vêm do banco e passam por schemas Pydantic estritos.
+
+## Versões
+
+| Produto              | Versão          |
+| -------------------- | --------------- |
+| Revisão              | `review-v1`     |
+| Apostila estruturada | `notes-v1`      |
+| Resumo               | `summary-v1`    |
+| Flashcards           | `flashcards-v1` |
+| Questões             | `questions-v1`  |
+| Mapa mental          | `mindmap-v1`    |
+
+As constantes de produto ficam em `packages/prompts/src/index.ts`; `materials.prompt_version` registra a versão usada. As instruções executáveis e schemas ficam junto ao provider Python para que validação e chamada sejam alteradas no mesmo review.
+
+## Revisão conservadora
+
+Invariantes:
+
+- preservar IDs, ordem, sentido e exemplos;
+- não resumir nem introduzir conhecimento externo;
+- corrigir somente pontuação, português evidente e termos com confiança;
+- marcar nomes, números, dosagens, termos técnicos e trechos sem sentido;
+- `needs_review=true` exatamente quando existem issues;
+- retornar todos os IDs do lote uma vez.
+
+`ReviewBatch` valida a resposta. IDs ausentes, extras ou duplicados causam falha integral do job; nada é salvo parcialmente. `raw_text` permanece imutável.
+
+## Contexto
+
+A transcrição pode receber título, disciplina, professor, glossário e texto extraído do PDF. O PDF é lido com `pypdf` em modo estrito, limitado a 40 páginas/10 mil caracteres. O arquivo bruto nunca é enviado como texto.
+
+O modelo diarizado não recebe prompt contextual; o contexto é preservado para motores que o suportam. Sem diarização, `speaker_label` fica nulo; o sistema não inventa falantes.
+
+## Materiais
+
+Cada produto recebe somente a transcrição efetiva da versão validada. A instrução proíbe HTML e exige milissegundos/IDs de origem.
+
+- Resumo: visão geral, conceitos, mecanismos, classificações, causalidade, exemplos, ênfases, pegadinhas, prova e referências.
+- Flashcards: frente/verso, timestamp, tags, dificuldade e segmentos-fonte.
+- Questões: cinco alternativas distintas, exatamente uma correta e explicações.
+- Mapa: hierarquia JSON e Mermaid `mindmap` com labels simples.
+- Apostila: seções cronológicas, exemplos, ênfases e dúvidas.
+
+Pydantic rejeita forma ou cardinalidade inválida. Mermaid é renderizado em modo estrito e sanitizado; o modelo não produz o binário PDF.
+
+## Mudanças de prompt
+
+1. Crie nova constante de versão.
+2. Altere instrução e/ou schema.
+3. Adicione fixture de resposta válida e inválida.
+4. Teste preservação dos IDs e semântica de retry.
+5. Mantenha materiais antigos imutáveis; uma nova geração cria nova versão.
+
+## Provider fake
+
+O fake é explícito, determinístico e cobre as mesmas classes de domínio. Ele gera um trecho duvidoso para exercitar conferência humana. Não é fallback silencioso quando a OpenAI falha.

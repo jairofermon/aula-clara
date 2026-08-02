@@ -1,0 +1,2 @@
+-- O fluxo principal não usa dados fictícios. Usuários e aulas são criados pela aplicação.
+-- Testes de integração criam seus próprios dados em transações ou via Auth local.

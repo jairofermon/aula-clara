@@ -1,0 +1,614 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Download, Pause, Play, RotateCcw, Search, SkipForward } from "lucide-react";
+import {
+  flashcardsToAnkiCsv,
+  formatTimestamp,
+  type ClassStatus,
+  type Flashcard,
+  type TranscriptSegment
+} from "@aula-clara/shared";
+import { ProgressBar } from "@/components/progress-bar";
+import { STATUS_LABELS, statusTone } from "@/lib/status";
+import { MindmapView } from "@/components/mindmap-view";
+import { seekAudio } from "@/lib/player";
+
+interface ClassInfo {
+  id: string;
+  title: string;
+  topic: string;
+  status: ClassStatus;
+  progress: number;
+  current_stage: string | null;
+  error_message: string | null;
+  duration_ms: number | null;
+}
+interface Material {
+  id: string;
+  material_type: string;
+  status: string;
+  version: number;
+  structured_content: Record<string, unknown>;
+  markdown_content: string | null;
+  storage_path: string | null;
+  error_message: string | null;
+}
+interface Progress {
+  status: ClassStatus;
+  progress: number;
+  current_stage: string | null;
+  error_message: string | null;
+  chunks_completed: number;
+  chunks_total: number;
+}
+
+function SegmentCard({
+  segment,
+  active,
+  onSeek,
+  onUpdated
+}: {
+  segment: TranscriptSegment;
+  active: boolean;
+  onSeek: (ms: number) => void;
+  onUpdated: (item: TranscriptSegment) => void;
+}) {
+  const [text, setText] = useState(segment.revised_text ?? segment.raw_text);
+  const [dirty, setDirty] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  const persist = useCallback(
+    async (action: "save" | "confirm" | "keep_original" | "accept_suggestion", value = text) => {
+      setSaveState("saving");
+      const response = await fetch(`/api/segments/${segment.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ revised_text: value, action })
+      });
+      const payload = (await response.json()) as {
+        data?: Pick<TranscriptSegment, "revised_text" | "review_status" | "user_confirmed">;
+      };
+      if (!response.ok || !payload.data) {
+        setSaveState("error");
+        return;
+      }
+      const updated = {
+        ...segment,
+        ...payload.data,
+        issues: segment.issues?.map((issue) => ({
+          ...issue,
+          status: payload.data?.user_confirmed ? ("resolved" as const) : issue.status
+        }))
+      };
+      setText(updated.revised_text ?? updated.raw_text);
+      setDirty(false);
+      setSaveState("saved");
+      onUpdated(updated);
+    },
+    [onUpdated, segment, text]
+  );
+
+  useEffect(() => {
+    if (!dirty) return;
+    const timer = window.setTimeout(() => void persist("save"), 900);
+    return () => window.clearTimeout(timer);
+  }, [dirty, persist, text]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const openIssue = segment.issues?.find((issue) => issue.status === "open");
+  return (
+    <article
+      id={`segment-${segment.id}`}
+      className={`h-[322px] overflow-auto rounded-xl border p-4 transition ${active ? "border-[#176b58] bg-[#edf5f1] shadow-md" : openIssue ? "border-amber-300 bg-amber-50/50" : "border-[#dbe4df] bg-white"}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            className="rounded-lg bg-[#176b58] px-2.5 py-1.5 font-mono text-sm font-bold text-white"
+            onClick={() => onSeek(segment.start_ms)}
+            aria-label={`Ir para ${formatTimestamp(segment.start_ms)}`}
+          >
+            {formatTimestamp(segment.start_ms)}
+          </button>
+          <span className="badge bg-slate-100 text-slate-700">
+            {segment.speaker_label || "Falante não identificado"}
+          </span>
+          {segment.confidence != null && (
+            <span className="text-xs text-[#61736f]">
+              Confiança {Math.round(segment.confidence * 100)}%
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-[#61736f]" aria-live="polite">
+          {saveState === "saving"
+            ? "Salvando…"
+            : segment.user_confirmed
+              ? "Confirmado"
+              : saveState === "saved"
+                ? "Salvo"
+                : saveState === "error"
+                  ? "Falha ao salvar"
+                  : ""}
+        </span>
+      </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-bold text-[#61736f]">
+          Texto bruto (preservado)
+        </summary>
+        <p className="mt-2 rounded-lg bg-slate-50 p-3 text-sm leading-6">{segment.raw_text}</p>
+      </details>
+      <label className="mt-3 block">
+        <span className="label">Texto revisado</span>
+        <textarea
+          className="field min-h-24 resize-y leading-6"
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+            setDirty(true);
+            setSaveState("idle");
+          }}
+        />
+      </label>
+      {openIssue && (
+        <div className="mt-3 rounded-lg bg-[#fff4dc] p-3 text-sm">
+          <strong>{openIssue.issue_type}:</strong> {openIssue.description}
+          {openIssue.proposed_text && <span> · Sugestão: “{openIssue.proposed_text}”</span>}
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          className="btn btn-primary !min-h-9 !px-3 !py-1 text-sm"
+          onClick={() => void persist("confirm")}
+        >
+          Confirmar
+        </button>
+        <button
+          className="btn btn-secondary !min-h-9 !px-3 !py-1 text-sm"
+          onClick={() => void persist("keep_original", segment.raw_text)}
+        >
+          Manter original
+        </button>
+        {openIssue?.proposed_text && (
+          <button
+            className="btn btn-secondary !min-h-9 !px-3 !py-1 text-sm"
+            onClick={() => void persist("accept_suggestion", openIssue.proposed_text ?? text)}
+          >
+            Aceitar sugestão
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function VirtualTranscript({
+  segments,
+  activeId,
+  onSeek,
+  onUpdated
+}: {
+  segments: TranscriptSegment[];
+  activeId?: string;
+  onSeek: (ms: number) => void;
+  onUpdated: (item: TranscriptSegment) => void;
+}) {
+  const rowHeight = 338;
+  const [scrollTop, setScrollTop] = useState(0);
+  const height = 680;
+  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 2);
+  const end = Math.min(segments.length, Math.ceil((scrollTop + height) / rowHeight) + 2);
+  return (
+    <div
+      className="relative overflow-auto rounded-2xl"
+      style={{ height }}
+      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      aria-label="Segmentos da transcrição"
+    >
+      <div style={{ height: segments.length * rowHeight, position: "relative" }}>
+        {segments.slice(start, end).map((segment, offset) => (
+          <div
+            key={segment.id}
+            style={{ position: "absolute", top: (start + offset) * rowHeight, left: 0, right: 0 }}
+          >
+            <SegmentCard
+              segment={segment}
+              active={segment.id === activeId}
+              onSeek={onSeek}
+              onUpdated={onUpdated}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MaterialsPanel({ classId }: { classId: string }) {
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [message, setMessage] = useState("");
+  const load = useCallback(async () => {
+    const response = await fetch(`/api/classes/${classId}/materials`);
+    if (response.ok) {
+      const body = (await response.json()) as { data: Material[] };
+      setMaterials(body.data);
+    }
+  }, [classId]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  useEffect(() => {
+    if (!materials.some((material) => ["pending", "generating"].includes(material.status))) return;
+    const timer = window.setInterval(() => void load(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [load, materials]);
+  async function generate(material_type: string) {
+    setMessage("Registrando geração…");
+    const response = await fetch(`/api/classes/${classId}/materials`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ material_type })
+    });
+    const body = (await response.json()) as { error?: { message: string } };
+    setMessage(
+      response.ok ? "Material colocado na fila." : (body.error?.message ?? "Falha ao gerar.")
+    );
+    await load();
+  }
+  function exportCsv(material: Material) {
+    const cards = Array.isArray(material.structured_content.flashcards)
+      ? (material.structured_content.flashcards as Flashcard[])
+      : [];
+    const blob = new Blob(["\ufeff", flashcardsToAnkiCsv(cards)], {
+      type: "text/csv;charset=utf-8"
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `aula-clara-flashcards-v${material.version}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+  const labels: Record<string, string> = {
+    notes: "Apostila",
+    summary: "Resumo",
+    flashcards: "Flashcards",
+    questions: "Questões",
+    mindmap: "Mapa mental",
+    pdf: "PDF da apostila"
+  };
+  return (
+    <section className="mt-10" aria-labelledby="materials-title">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 id="materials-title" className="text-2xl font-black">
+            Materiais de estudo
+          </h2>
+          <p className="mt-1 text-sm text-[#61736f]">
+            Cada produto usa a versão validada e é gerado separadamente.
+          </p>
+        </div>
+        {message && (
+          <p role="status" className="text-sm text-[#61736f]">
+            {message}
+          </p>
+        )}
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {["notes", "summary", "flashcards", "questions", "mindmap", "pdf"].map((type) => (
+          <button className="btn btn-secondary" key={type} onClick={() => void generate(type)}>
+            {labels[type]}
+          </button>
+        ))}
+      </div>
+      <div className="mt-5 space-y-4">
+        {materials.map((material) => (
+          <article className="card p-5" key={material.id}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-black">
+                  {labels[material.material_type] ?? material.material_type} · v{material.version}
+                </h3>
+                <span className="text-sm text-[#61736f]">
+                  {material.status === "completed"
+                    ? "Pronto"
+                    : material.status === "failed"
+                      ? "Falhou"
+                      : "Em processamento"}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                {material.material_type === "flashcards" && material.status === "completed" && (
+                  <button className="btn btn-secondary" onClick={() => exportCsv(material)}>
+                    <Download size={17} aria-hidden /> CSV Anki
+                  </button>
+                )}
+                {material.storage_path && (
+                  <a className="btn btn-primary" href={`/api/materials/${material.id}/download`}>
+                    <Download size={17} aria-hidden /> Baixar
+                  </a>
+                )}
+              </div>
+            </div>
+            {material.markdown_content && (
+              <div className="mt-4 whitespace-pre-wrap rounded-lg bg-slate-50 p-4 text-sm leading-6">
+                {material.markdown_content}
+              </div>
+            )}
+            {material.material_type === "mindmap" &&
+              typeof material.structured_content.mermaid === "string" && (
+                <div className="mt-4">
+                  <MindmapView code={material.structured_content.mermaid} />
+                </div>
+              )}
+            {material.status === "completed" &&
+              !material.markdown_content &&
+              material.material_type !== "mindmap" && (
+                <pre className="mt-4 max-h-96 overflow-auto rounded-lg bg-slate-50 p-4 text-xs">
+                  {JSON.stringify(material.structured_content, null, 2)}
+                </pre>
+              )}
+            {material.error_message && (
+              <p className="mt-3 text-sm text-red-700">{material.error_message}</p>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function ClassWorkspace({
+  initialClass,
+  initialSegments
+}: {
+  initialClass: ClassInfo;
+  initialSegments: TranscriptSegment[];
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [segments, setSegments] = useState(initialSegments);
+  const [progress, setProgress] = useState<Progress>({
+    ...initialClass,
+    chunks_completed: 0,
+    chunks_total: 0
+  });
+  const [audioUrl, setAudioUrl] = useState("");
+  const [playing, setPlaying] = useState(false);
+  const [currentMs, setCurrentMs] = useState(0);
+  const [durationMs, setDurationMs] = useState(initialClass.duration_ms ?? 0);
+  const [search, setSearch] = useState("");
+  const [onlyIssues, setOnlyIssues] = useState(false);
+
+  const loadSegments = useCallback(async () => {
+    const response = await fetch(`/api/classes/${initialClass.id}/transcript`);
+    if (response.ok) {
+      const body = (await response.json()) as { data: TranscriptSegment[] };
+      setSegments(body.data);
+    }
+  }, [initialClass.id]);
+  useEffect(() => {
+    void fetch(`/api/classes/${initialClass.id}/audio-url`)
+      .then(async (response) =>
+        response.ok
+          ? (response.json() as Promise<{ data: { url: string; duration_ms: number | null } }>)
+          : null
+      )
+      .then((body) => {
+        if (body) {
+          setAudioUrl(body.data.url);
+          if (body.data.duration_ms) setDurationMs(body.data.duration_ms);
+        }
+      });
+  }, [initialClass.id]);
+  useEffect(() => {
+    const poll = async () => {
+      if (document.hidden) return;
+      const response = await fetch(`/api/classes/${initialClass.id}/progress`, {
+        cache: "no-store"
+      });
+      if (response.ok) {
+        const body = (await response.json()) as { data: Progress };
+        setProgress(body.data);
+        if (body.data.status === "needs_user_review" || body.data.status === "completed")
+          await loadSegments();
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 3000);
+    return () => window.clearInterval(timer);
+  }, [initialClass.id, loadSegments]);
+  const active = segments.find(
+    (segment) => currentMs >= segment.start_ms && currentMs < segment.end_ms
+  );
+  const filtered = useMemo(
+    () =>
+      segments.filter((segment) => {
+        const matchesIssue =
+          !onlyIssues || segment.issues?.some((issue) => issue.status === "open");
+        const haystack =
+          `${segment.raw_text} ${segment.revised_text ?? ""} ${segment.speaker_label ?? ""}`.toLocaleLowerCase(
+            "pt-BR"
+          );
+        return matchesIssue && haystack.includes(search.toLocaleLowerCase("pt-BR"));
+      }),
+    [onlyIssues, search, segments]
+  );
+  const openIssues = segments.filter((segment) =>
+    segment.issues?.some((issue) => issue.status === "open")
+  );
+  function seek(ms: number) {
+    if (!audioRef.current) return;
+    seekAudio(audioRef.current, ms);
+    setCurrentMs(ms);
+    void audioRef.current.play();
+  }
+  function updateSegment(updated: TranscriptSegment) {
+    setSegments((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+  }
+  function nextIssue() {
+    const next = openIssues.find((item) => item.start_ms > currentMs) ?? openIssues[0];
+    if (next) {
+      seek(next.start_ms);
+      document.getElementById(`segment-${next.id}`)?.scrollIntoView({ block: "center" });
+    }
+  }
+  async function retry() {
+    await fetch(`/api/classes/${initialClass.id}/retry`, { method: "POST" });
+  }
+
+  return (
+    <main className="mx-auto max-w-7xl px-5 py-7">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="font-bold text-[#176b58]">Transcrição e revisão</p>
+          <h1 className="mt-1 text-3xl font-black sm:text-4xl">{initialClass.title}</h1>
+          <p className="mt-2 text-[#61736f]">{initialClass.topic}</p>
+        </div>
+        <span className={`badge ${statusTone(progress.status)}`}>
+          {STATUS_LABELS[progress.status]}
+        </span>
+      </div>
+      <section className="card sticky top-3 z-20 mt-7 p-4 sm:p-5" aria-label="Player de áudio">
+        <audio
+          ref={audioRef}
+          src={audioUrl || undefined}
+          onTimeUpdate={(event) => setCurrentMs(event.currentTarget.currentTime * 1000)}
+          onLoadedMetadata={(event) => setDurationMs(event.currentTarget.duration * 1000)}
+          onEnded={() => setPlaying(false)}
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="grid h-11 w-11 place-items-center rounded-full bg-[#176b58] text-white"
+            aria-label={playing ? "Pausar" : "Reproduzir"}
+            onClick={() => {
+              const player = audioRef.current;
+              if (!player) return;
+              if (player.paused) {
+                void player.play();
+                setPlaying(true);
+              } else {
+                player.pause();
+                setPlaying(false);
+              }
+            }}
+          >
+            {playing ? <Pause aria-hidden /> : <Play aria-hidden />}
+          </button>
+          <button
+            className="btn btn-secondary !min-h-10"
+            onClick={() => seek(Math.max(0, currentMs - 10_000))}
+          >
+            <RotateCcw size={17} aria-hidden /> 10 s
+          </button>
+          <span className="min-w-28 font-mono text-sm">
+            {formatTimestamp(currentMs)} / {formatTimestamp(durationMs)}
+          </span>
+          <input
+            className="min-w-36 flex-1 accent-[#176b58]"
+            type="range"
+            min={0}
+            max={Math.max(1, durationMs)}
+            value={Math.min(currentMs, durationMs)}
+            onChange={(event) => seek(Number(event.target.value))}
+            aria-label="Posição do áudio"
+          />
+          <label className="text-sm font-bold">
+            Velocidade{" "}
+            <select
+              className="ml-1 rounded-lg border p-2"
+              defaultValue="1"
+              onChange={(event) => {
+                if (audioRef.current) audioRef.current.playbackRate = Number(event.target.value);
+              }}
+            >
+              <option value="0.75">0,75×</option>
+              <option value="1">1×</option>
+              <option value="1.25">1,25×</option>
+              <option value="1.5">1,5×</option>
+              <option value="2">2×</option>
+            </select>
+          </label>
+        </div>
+      </section>
+      <section className="mt-5 grid gap-5 lg:grid-cols-[1fr_330px]">
+        <div>
+          <div className="mb-4 flex flex-wrap gap-3">
+            <label className="relative min-w-64 flex-1">
+              <Search className="absolute left-3 top-3 text-[#61736f]" size={18} aria-hidden />
+              <span className="sr-only">Buscar transcrição</span>
+              <input
+                className="field pl-10"
+                placeholder="Buscar na transcrição"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+            <label className="btn btn-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                checked={onlyIssues}
+                onChange={(event) => setOnlyIssues(event.target.checked)}
+              />{" "}
+              Somente pendências
+            </label>
+            <button className="btn btn-secondary" disabled={!openIssues.length} onClick={nextIssue}>
+              <SkipForward size={17} aria-hidden /> Próximo problema
+            </button>
+          </div>
+          {filtered.length ? (
+            <VirtualTranscript
+              segments={filtered}
+              activeId={active?.id}
+              onSeek={seek}
+              onUpdated={updateSegment}
+            />
+          ) : (
+            <div className="card p-8 text-center text-[#61736f]">
+              {segments.length
+                ? "Nenhum segmento corresponde ao filtro."
+                : "A transcrição aparecerá aqui quando os primeiros blocos forem consolidados."}
+            </div>
+          )}
+        </div>
+        <aside className="card h-fit p-5">
+          <h2 className="font-black">Processamento</h2>
+          <div className="mt-4">
+            <ProgressBar
+              value={progress.progress}
+              label={progress.current_stage ?? STATUS_LABELS[progress.status]}
+            />
+          </div>
+          {progress.chunks_total > 0 && (
+            <p className="mt-3 text-sm text-[#61736f]">
+              {progress.chunks_completed} de {progress.chunks_total} blocos concluídos
+            </p>
+          )}
+          <p className="mt-3 text-sm">
+            <strong>{openIssues.length}</strong> pendência(s) aberta(s)
+          </p>
+          {progress.error_message && (
+            <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+              <p>{progress.error_message}</p>
+              <button className="mt-3 font-bold underline" onClick={() => void retry()}>
+                Repetir etapa com falha
+              </button>
+            </div>
+          )}
+          <a
+            className="mt-4 block text-sm font-bold text-[#176b58] underline"
+            href={`/classes/${initialClass.id}/diagnostics`}
+          >
+            Abrir diagnóstico técnico
+          </a>
+        </aside>
+      </section>
+      <MaterialsPanel classId={initialClass.id} />
+    </main>
+  );
+}

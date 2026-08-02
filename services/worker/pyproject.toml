@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aula-clara-worker"
+version = "0.1.0"
+description = "Worker persistente de processamento do Aula Clara"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi==0.128.0",
+  "uvicorn[standard]==0.40.0",
+  "pydantic==2.12.5",
+  "psycopg[binary,pool]==3.3.2",
+  "httpx==0.28.1",
+  "openai==2.20.0",
+  "supabase==2.27.0",
+  "pypdf==6.6.0",
+  "playwright==1.58.0",
+  "jinja2==3.1.6",
+  "structlog==25.5.0"
+]
+
+[project.optional-dependencies]
+test = ["pytest==9.0.2", "pytest-cov==7.0.0", "pytest-asyncio==1.3.0"]
+
+[project.scripts]
+aula-clara-worker = "aula_clara_worker.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aula_clara_worker"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q --strict-markers -p no:cacheprovider"
+markers = ["integration: teste opcional que requer serviços/credenciais"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]

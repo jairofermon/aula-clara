@@ -1,0 +1,77 @@
+# API do MVP
+
+Os Route Handlers ficam sob `/api`. Todos exigem cookie de sessão Supabase, exceto o callback de Auth. Payloads usam JSON; erros seguem `{ "error": { "code", "message", "details?" } }`. O servidor valida o proprietário e o banco reaplica RLS.
+
+## Disciplinas
+
+| Método   | Rota                | Corpo/resultado                     |
+| -------- | ------------------- | ----------------------------------- |
+| `GET`    | `/api/subjects`     | Lista disciplinas do usuário.       |
+| `POST`   | `/api/subjects`     | `{ name, description? }`; cria.     |
+| `PATCH`  | `/api/subjects/:id` | Altera nome/descrição.              |
+| `DELETE` | `/api/subjects/:id` | Exclui somente se não houver aulas. |
+
+## Aulas e processamento
+
+| Método | Rota                         | Corpo/resultado                                         |
+| ------ | ---------------------------- | ------------------------------------------------------- |
+| `POST` | `/api/classes`               | Disciplina, título, assunto, data, idioma e metadados.  |
+| `POST` | `/api/classes/:id/process`   | Cria `prepare_audio` idempotente após upload concluído. |
+| `GET`  | `/api/classes/:id/progress`  | Status, etapa, progresso, chunks e erros seguros.       |
+| `POST` | `/api/classes/:id/retry`     | Reabre somente jobs falhos recuperáveis.                |
+| `GET`  | `/api/classes/:id/audio-url` | URL assinada curta para o player.                       |
+
+## Upload direto
+
+`POST /api/uploads/start`:
+
+```json
+{
+  "class_id": "uuid",
+  "file_type": "audio",
+  "original_name": "aula.wav",
+  "mime_type": "audio/wav",
+  "size_bytes": 128044,
+  "sha256": "64-hex"
+}
+```
+
+Cria path interno aleatório e retorna token/URL assinada. O navegador envia o arquivo diretamente ao Storage com `XMLHttpRequest`, permitindo progresso e cancelamento.
+
+`POST /api/uploads/complete` recebe `{ file_id }`, confirma que o objeto existe e marca o registro. Duplicatas retornam conflito antes de criar job. PDF e complementos usam os mesmos endpoints com tipos permitidos.
+
+## Transcrição e issues
+
+| Método  | Rota                          | Corpo/resultado                                                                                |
+| ------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET`   | `/api/classes/:id/transcript` | Segmentos ordenados, tempos em ms e issues.                                                    |
+| `PATCH` | `/api/segments/:id`           | `{ revised_text, action }`; action: `save`, `confirm`, `keep_original` ou `accept_suggestion`. |
+| `PATCH` | `/api/issues/:id`             | `{ action: "resolve"                                                                           | "dismiss" }`. |
+
+`raw_text` não é aceito em updates. Confirmação resolve issues abertas daquele segmento e atualiza a validade da versão quando não restam pendências.
+
+## Materiais
+
+| Método | Rota                          | Corpo/resultado                                                                         |
+| ------ | ----------------------------- | --------------------------------------------------------------------------------------- |
+| `GET`  | `/api/classes/:id/materials`  | Lista versões e estado.                                                                 |
+| `POST` | `/api/classes/:id/materials`  | `{ material_type }`; `notes`, `summary`, `flashcards`, `questions`, `mindmap` ou `pdf`. |
+| `GET`  | `/api/materials/:id/download` | Redireciona para URL assinada curta do export privado.                                  |
+
+A geração retorna `202`. Um material pendente do mesmo tipo é reutilizado; uma nova versão só nasce após a anterior terminar. O endpoint rejeita transcrição ausente, segmentos não revisados e issues abertas.
+
+## Códigos usuais
+
+- `400`: requisição inválida.
+- `401`: sessão ausente/expirada.
+- `404`: recurso inexistente ou de outro usuário.
+- `409`: duplicata, revisão pendente ou estado incompatível.
+- `413`: arquivo acima do limite.
+- `415`: MIME/extensão não permitidos.
+- `422`: schema inválido.
+- `500`: falha interna com mensagem segura.
+- `201/202`: criado/colocado na fila.
+
+## Polling
+
+A tela consulta progresso e segmentos em intervalo controlado; materiais pendentes são atualizados a cada dois segundos. Os percentuais vêm de marcos persistidos e contagem de chunks, nunca de cronômetro.
