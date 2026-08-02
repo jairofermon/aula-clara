@@ -20,6 +20,10 @@ Gravações, slides e transcrições podem conter dados pessoais, educacionais o
 - Mermaid opera com `securityLevel: strict` e o SVG passa por DOMPurify. PDF usa template próprio e escape HTML.
 - `OPENAI_API_KEY`, service role e URL direta do banco não usam prefixo `NEXT_PUBLIC_` e não entram no bundle do navegador.
 - `.env`, `.env.local`, relatórios e temporários são ignorados pelo Git/Docker.
+- No deploy gratuito, a Cloudflare Queue transporta apenas `job_id`; áudio e transcrição não entram na mensagem.
+- O consumidor Cloudflare acessa RPCs `SECURITY DEFINER` revogadas de `anon`/`authenticated` e liberadas somente para `service_role`.
+- Workers AI recebe somente o chunk necessário e contexto limitado; a resposta passa por Zod estrito antes de qualquer persistência.
+- O PDF é montado localmente no navegador autenticado, sem enviar a apostila a um segundo serviço de renderização.
 
 ## Autorização nas APIs
 
@@ -39,15 +43,16 @@ O MVP não executa purge automático. Antes de produção, criar rotina idempote
 
 ## Ameaças e resposta
 
-| Cenário                   | Controle atual                                                   |
-| ------------------------- | ---------------------------------------------------------------- |
-| UUID de outro usuário     | Ownership no handler + RLS/FKs.                                  |
-| URL de arquivo vazada     | Bucket privado e expiração curta.                                |
-| Upload disfarçado         | MIME/extensão, tamanho, ffprobe/FFmpeg e parser PDF estrito.     |
-| Conteúdo gerado malicioso | Schemas estritos, sem HTML do modelo, escape e sanitização.      |
-| Worker duplicado          | `FOR UPDATE SKIP LOCKED`, lease e idempotency key.               |
-| Exposição de chave        | Segredos somente em env do worker; nenhum log de env.            |
-| Falha durante upload      | Registro incompleto não inicia job; conclusão verifica o objeto. |
+| Cenário                    | Controle atual                                                            |
+| -------------------------- | ------------------------------------------------------------------------- |
+| UUID de outro usuário      | Ownership no handler + RLS/FKs.                                           |
+| URL de arquivo vazada      | Bucket privado e expiração curta.                                         |
+| Upload disfarçado          | MIME/extensão, tamanho, ffprobe/FFmpeg e parser PDF estrito.              |
+| Conteúdo gerado malicioso  | Schemas estritos, sem HTML do modelo, escape e sanitização.               |
+| Worker duplicado           | Claim transacional por ID, lease, idempotency key e resultado persistido. |
+| Exposição de chave         | Segredos somente em env do worker; nenhum log de env.                     |
+| Falha durante upload       | Registro incompleto não inicia job; conclusão verifica o objeto.          |
+| Mensagem duplicada/perdida | Ack somente após conclusão; cron recupera o job no PostgreSQL.            |
 
 ## Pendências antes de produção
 
@@ -58,3 +63,8 @@ O MVP não executa purge automático. Antes de produção, criar rotina idempote
 - Revisão de DPA/subprocessadores e localização dos dados.
 - CSP, monitoramento de dependências e testes de invasão.
 - OCR e scanners isolados, caso sejam adicionados.
+- Avaliação formal dos termos/DPA de Supabase e Cloudflare antes de processar dados sensíveis ou médicos reais.
+
+## Limite de segurança desta entrega
+
+Esta vertical é adequada para validação de produto e conteúdo educacional autorizado, mas não representa certificação de conformidade LGPD nem ambiente clínico. O usuário deve evitar dados médicos identificáveis até que retenção, DPA, resposta a incidentes e avaliação jurídica estejam concluídos.

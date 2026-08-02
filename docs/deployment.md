@@ -1,58 +1,180 @@
-# Deploy
+# Deploy web gratuito
 
-Este repositório não publica automaticamente e não cria recursos pagos. O alvo natural é uma instância Supabase gerenciada, uma imagem web e uma ou mais réplicas da imagem do worker.
+## Topologia escolhida
 
-## Artefatos
+```text
+GitHub
+  ↓ build/deploy manual
+Cloudflare Workers + OpenNext
+  ├─ aplicação Next.js
+  ├─ Queue: entrega somente job_id
+  ├─ cron: recupera jobs persistidos sem entrega
+  └─ Workers AI: transcrição, revisão e materiais
+          ↓
+Supabase Free (São Paulo)
+  ├─ Auth
+  ├─ PostgreSQL + RLS + processing_jobs
+  └─ Storage privado
+```
 
-- `apps/web/Dockerfile`: build standalone do Next.js em Node 22.
-- `services/worker/Dockerfile`: Python 3.12, FFmpeg, dependências e Chromium.
-- `docker-compose.yml`: desenvolvimento; não é um manifesto de produção.
+O PostgreSQL é a fonte de verdade da fila. A Cloudflare Queue apenas entrega o ID; perder ou duplicar uma mensagem não perde nem duplica uma etapa paga, porque claim, locks, tentativas e resultados são persistidos e idempotentes. Um cron de cinco minutos recoloca jobs elegíveis na Queue.
 
-## Sequência recomendada
+O PDF é gerado com `pdf-lib` no navegador autenticado a partir da apostila já validada e enviado diretamente ao bucket privado. Isso evita executar Chromium em um servidor pago.
 
-1. Criar o projeto Supabase e configurar as URLs de callback.
-2. Aplicar migrations com Supabase CLI em uma identidade de deploy.
-3. Criar segredos no cofre da plataforma; nunca como build arg, exceto valores `NEXT_PUBLIC_*`.
-4. Construir a web com a origem pública e chave anon do ambiente.
-5. Publicar o worker com acesso TLS ao PostgreSQL e à API Storage.
-6. Iniciar uma réplica, validar fila/custos e só então aumentar concorrência.
-7. Executar smoke test com provider fake em staging e integração OpenAI opt-in.
+Consulte [ADR 0007](decisions/0007-free-cloud-deployment.md) antes de mudar a topologia.
 
-## Variáveis por componente
+## O que “gratuito” significa
 
-Web:
+- ChatGPT Plus não fornece uma chave nem créditos da OpenAI API.
+- O caminho publicado usa Workers AI e não possui fallback para OpenAI.
+- Nenhum recurso pago é criado por este repositório.
+- Ao atingir cota, o job fica em retry e a interface informa a indisponibilidade; a execução recomeça após a renovação.
+- As cotas são do provedor e podem mudar. Verifique-as no painel antes de uso intenso.
 
-- `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-- `SUPABASE_INTERNAL_URL` quando a rota interna difere da pública.
-- `MAX_UPLOAD_SIZE_MB`, `SIGNED_URL_TTL_SECONDS`.
+O limite próprio do Aula Clara começa em 15 MB por áudio, abaixo do limite por arquivo do Supabase Free. Essa primeira implantação em nuvem trata o áudio como um único chunk e não executa FFmpeg.
 
-Worker:
+## Pré-requisitos
 
-- `SUPABASE_DB_URL`, `SUPABASE_INTERNAL_URL` ou `NEXT_PUBLIC_SUPABASE_URL`.
-- `SUPABASE_SERVICE_ROLE_KEY`.
-- `PROVIDER_MODE`, `OPENAI_API_KEY` e três modelos.
-- chunk, lock, polling, custos e log level.
+- repositório GitHub `jairofermon/aula-clara`;
+- projeto Supabase `rctuenfnwlzmmpyjzhmq`, região São Paulo;
+- conta Cloudflare gratuita com Workers AI e Queues disponíveis;
+- Node.js 22 e pnpm 10.15.1 no computador usado apenas para publicar.
 
-## Banco e concorrência
+Depois do deploy, o produto roda na web e o computador pode ser desligado.
 
-O protocolo aceita vários workers porque o claim usa `FOR UPDATE SKIP LOCKED`. Cada réplica deve ter `WORKER_ID` único. O pool deve respeitar o limite do Supabase; comece com uma réplica. A conexão de produção precisa exigir TLS e usar o endpoint direto/pooler recomendado para jobs longos.
+## Passo 1 — Supabase
 
-## Health e operação
+Autentique a CLI e aplique as migrations:
 
-O perfil `diagnostics` expõe o FastAPI em `/health`, sem comandos de processamento. Use-o para probes se a plataforma precisar. O processo principal do worker deve ser reiniciado em falha; leases expirados tornam jobs recuperáveis.
+```powershell
+pnpm exec supabase login
+pnpm exec supabase link --project-ref rctuenfnwlzmmpyjzhmq
+pnpm exec supabase db push
+```
 
-Alertas mínimos:
+Confirme no painel:
 
-- jobs `failed` ou `running` além do TTL;
-- crescimento de `retry_wait`, rate limit e quota;
-- tempo de preparação/transcrição/PDF;
-- custo estimado e áudio processado;
-- armazenamento e conexões do banco.
+1. **Database → Tables** contém `subjects`, `classes`, `class_files`, `processing_jobs`, `audio_chunks`, `transcript_segments`, `transcript_issues`, `materials` e `usage_records`.
+2. **Storage** contém os buckets privados `class-audio`, `class-materials` e `generated-exports`.
+3. RLS está habilitado nas tabelas de usuário.
+4. Em **Project Settings → API**, copie a URL, a chave publicável/anon e a service role.
 
-## Rollback
+A service role ignora RLS: nunca a cole no chat, navegador, `.env.production.local` ou GitHub. Ela entra apenas pelo prompt de segredo do Wrangler.
 
-Imagens devem ser tagueadas por commit. Prefira migrations aditivas e compatibilidade N/N-1 entre web, worker e esquema. Rollback de código não deve remover colunas; reversão destrutiva exige backup e procedimento separado.
+## Passo 2 — Cloudflare
 
-## Antes de produção
+Faça login:
 
-Implementar rate limiting, quotas/custos, retenção automática, gestão LGPD, antivírus, rotação de segredos, backups testados, CSP e observabilidade centralizada. O provider fake não deve ser selecionado silenciosamente em produção.
+```powershell
+pnpm --filter @aula-clara/web exec wrangler login
+```
+
+Crie as duas filas gratuitas uma única vez:
+
+```powershell
+pnpm --filter @aula-clara/web exec wrangler queues create aula-clara-processing
+pnpm --filter @aula-clara/web exec wrangler queues create aula-clara-processing-dlq
+```
+
+Crie `apps/web/.secrets.production`, ignorado pelo Git, contendo:
+
+```text
+SUPABASE_SERVICE_ROLE_KEY=<service-role-do-painel-supabase>
+```
+
+Esse arquivo é usado por `wrangler deploy --secrets-file`, que envia código e segredo na mesma versão. Isso evita publicar temporariamente um Worker sem todos os segredos. O arquivo nunca deve ser commitado ou compartilhado; apague-o após o deploy se preferir.
+
+- `SUPABASE_URL` já está em `wrangler.jsonc`, pois é pública;
+- `SUPABASE_SERVICE_ROLE_KEY` é o único segredo obrigatório do Worker;
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` é publicável e entra em `.env.production.local` para ser incorporada ao build.
+
+Os nomes das filas, binding `AI`, cron, limites e modelos ficam versionados em `apps/web/wrangler.jsonc`.
+
+## Passo 3 — variáveis públicas de build
+
+Crie `apps/web/.env.production.local`:
+
+```text
+NEXT_PUBLIC_APP_URL=https://aula-clara.<subdominio>.workers.dev
+NEXT_PUBLIC_SUPABASE_URL=https://rctuenfnwlzmmpyjzhmq.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<chave-publicável>
+PROCESSING_DISPATCH_MODE=cloudflare
+MAX_UPLOAD_SIZE_MB=15
+SIGNED_URL_TTL_SECONDS=300
+```
+
+O arquivo é ignorado pelo Git. A chave anon é publicável, mas continua sujeita a RLS; a service role não é variável pública.
+
+## Passo 4 — validar e publicar
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm --filter @aula-clara/web build:cloudflare
+pnpm --filter @aula-clara/web deploy:cloudflare
+```
+
+O último comando mostra o domínio `workers.dev`. Se o subdomínio real for diferente do valor de `NEXT_PUBLIC_APP_URL`, corrija a variável e publique novamente.
+
+## Passo 5 — autenticação
+
+No Supabase, abra **Authentication → URL Configuration**:
+
+- Site URL: URL exata do Worker;
+- Redirect URLs:
+  - `https://aula-clara.<subdominio>.workers.dev/auth/callback`
+  - `https://aula-clara.<subdominio>.workers.dev/update-password`
+
+Durante o primeiro smoke test, mantenha confirmação de e-mail conforme sua preferência. O fluxo de recuperação já está preparado; a entrega de e-mail em produção depende das cotas/configuração de Auth do Supabase.
+
+## Passo 6 — smoke test real
+
+1. Cadastre um usuário e entre.
+2. Crie uma disciplina.
+3. Crie uma aula com WAV/MP3 pequeno, com fala clara e menos de 15 MB.
+4. Confirme progresso de `queued` até transcrição/revisão.
+5. Abra a transcrição e clique em um timestamp.
+6. Edite ou confirme os trechos pendentes.
+7. Gere resumo, flashcards, questões, mapa mental e apostila.
+8. Gere o PDF e baixe pela URL assinada.
+9. Abra **Diagnóstico** e confirme jobs, tentativas e uso sem conteúdo integral nos logs.
+
+## Passo 7 — domínio próprio opcional
+
+O domínio `workers.dev` é suficiente e gratuito. Como a conta Cloudflare já está ativa, um domínio existente pode ser ligado depois em **Workers & Pages → Custom Domains**. Ao mudar o domínio:
+
+1. atualize `NEXT_PUBLIC_APP_URL`;
+2. atualize Site URL e redirects no Supabase;
+3. refaça o build/deploy;
+4. teste login e recuperação de senha.
+
+## GitHub
+
+O workflow `.github/workflows/ci.yml` já executa lint, typecheck, testes, build Next e build OpenNext em Linux. Ele não publica e não usa credenciais reais.
+
+O deploy inicial permanece manual para evitar configuração prematura. Quando estiver estável, adicione um job de deploy protegido com:
+
+- `CLOUDFLARE_API_TOKEN` limitado ao Worker/Queues;
+- `CLOUDFLARE_ACCOUNT_ID`;
+- variáveis públicas de build;
+- gates antes do deploy.
+
+Não armazene service role no GitHub se ela já está no secret store do Worker. O workflow também não deve criar planos pagos.
+
+## Operação e retomada
+
+- `processing_jobs` controla estado, lock, tentativa, backoff e idempotência.
+- Queue usa lote de um job e reentrega em falha temporária.
+- O cron procura jobs pendentes, retries vencidos e locks expirados.
+- Transcrição persistida não chama novamente o Workers AI.
+- Revisão e materiais são gravados somente após validação integral do schema.
+- Falhas permanentes exibem mensagem segura; detalhes técnicos ficam em logs por `class_id`, `job_id` e `chunk_id`.
+
+## Limitações e expansão futura
+
+A publicação gratuita inicial não oferece conversão FFmpeg, chunking de arquivos longos, diarização confiável, OCR, antivírus, purge LGPD automático, SLA ou compliance para dados médicos. Para áudio longo, a próxima evolução é processamento em chunks num runtime apropriado; isso só deve ser adotado após medir custo e limites, sem habilitar cobrança automaticamente.
+
+O worker Python permanece como implementação de referência para FFmpeg, OpenAI opcional e PDF Playwright, mas não é necessário para operar o caminho web gratuito.

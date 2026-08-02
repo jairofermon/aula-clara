@@ -1,8 +1,33 @@
 # Arquitetura do Aula Clara
 
+## Alvo de produção gratuito
+
+A primeira implantação pública usa uma arquitetura híbrida Supabase + Cloudflare,
+sem OpenAI API obrigatória:
+
+```text
+Navegador → Next.js/OpenNext em Cloudflare Workers
+   ├─ sessão e dados → Supabase Auth/PostgreSQL com RLS
+   ├─ upload direto assinado → Supabase Storage privado
+   └─ comandos → processing_jobs → Cloudflare Queue
+                                      └─ consumidor TypeScript
+                                         ├─ Workers AI Whisper
+                                         ├─ Workers AI JSON Mode
+                                         └─ Supabase REST/RPC
+```
+
+`processing_jobs` continua sendo a fonte persistente. A Queue contém somente
+`job_id`, permite entrega duplicada e não substitui os locks, tentativas ou chaves
+de idempotência do PostgreSQL. Um varredor periódico recupera jobs que tenham sido
+persistidos, mas não entregues.
+
+O worker Python descrito abaixo permanece como implementação local e provider
+opcional. A decisão completa está em
+[ADR 0007](decisions/0007-free-cloud-deployment.md).
+
 ## Objetivo
 
-A primeira vertical do Aula Clara transforma áudio de aula e materiais opcionais em uma transcrição revisável e em materiais de estudo. O desenho privilegia execução local, persistência, retomada e segurança por proprietário, sem introduzir infraestrutura que o MVP não precisa.
+A primeira vertical do Aula Clara transforma áudio de aula e materiais opcionais em uma transcrição revisável e em materiais de estudo. O desenho privilegia persistência, retomada e segurança por proprietário. O desenvolvimento local continua disponível, mas não é requisito para o usuário final.
 
 ## Componentes
 

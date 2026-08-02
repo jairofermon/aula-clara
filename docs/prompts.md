@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Prompts são tratados como interfaces versionadas. O texto gerado nunca é autoridade sobre IDs, tempos, permissões ou estado da fila; esses valores vêm do banco e passam por schemas Pydantic estritos.
+Prompts são tratados como interfaces versionadas. O texto gerado nunca é autoridade sobre IDs, tempos, permissões ou estado da fila; esses valores vêm do banco e passam por schemas Zod no consumidor Cloudflare ou Pydantic no worker Python.
 
 ## Versões
 
@@ -15,7 +15,7 @@ Prompts são tratados como interfaces versionadas. O texto gerado nunca é autor
 | Questões             | `questions-v1`  |
 | Mapa mental          | `mindmap-v1`    |
 
-As constantes de produto ficam em `packages/prompts/src/index.ts`; `materials.prompt_version` registra a versão usada. As instruções executáveis e schemas ficam junto ao provider Python para que validação e chamada sejam alteradas no mesmo review.
+As constantes de produto ficam em `packages/prompts/src/index.ts`; `materials.prompt_version` registra a versão usada. O consumidor Workers AI usa JSON Mode com JSON Schema derivado do Zod compartilhado. O provider Python mantém os schemas Pydantic equivalentes. Em ambos os caminhos, validação e persistência são separadas.
 
 ## Revisão conservadora
 
@@ -28,7 +28,7 @@ Invariantes:
 - `needs_review=true` exatamente quando existem issues;
 - retornar todos os IDs do lote uma vez.
 
-`ReviewBatch` valida a resposta. IDs ausentes, extras ou duplicados causam falha integral do job; nada é salvo parcialmente. `raw_text` permanece imutável.
+`ReviewBatch` valida a resposta. IDs ausentes, extras ou duplicados causam falha integral do job; nada é salvo parcialmente. No caminho Cloudflare, uma RPC aplica o lote em transação única. `raw_text` permanece imutável.
 
 ## Contexto
 
@@ -46,7 +46,15 @@ Cada produto recebe somente a transcrição efetiva da versão validada. A instr
 - Mapa: hierarquia JSON e Mermaid `mindmap` com labels simples.
 - Apostila: seções cronológicas, exemplos, ênfases e dúvidas.
 
-Pydantic rejeita forma ou cardinalidade inválida. Mermaid é renderizado em modo estrito e sanitizado; o modelo não produz o binário PDF.
+Zod/Pydantic rejeitam forma, cardinalidade, IDs ou timestamps inválidos. Mermaid é renderizado em modo estrito e sanitizado; o modelo não produz o binário PDF.
+
+## Workers AI gratuito
+
+- Transcrição: `@cf/openai/whisper-large-v3-turbo`, idioma `pt`, VAD e contexto limitado.
+- Revisão e materiais: `@cf/meta/llama-3.1-8b-instruct-fast` em JSON Mode.
+- A configuração está centralizada no `wrangler.jsonc` e pode ser substituída por variável.
+- Resposta vazia, JSON inválido, IDs desconhecidos ou referências fora da transcrição geram retry controlado; campos não são inventados.
+- Sem suporte de diarização, `speaker_label` fica nulo.
 
 ## Mudanças de prompt
 

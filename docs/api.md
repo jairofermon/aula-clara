@@ -32,7 +32,8 @@ Os Route Handlers ficam sob `/api`. Todos exigem cookie de sessão Supabase, exc
   "original_name": "aula.wav",
   "mime_type": "audio/wav",
   "size_bytes": 128044,
-  "sha256": "64-hex"
+  "sha256": "64-hex",
+  "duration_ms": 42000
 }
 ```
 
@@ -52,15 +53,19 @@ Cria path interno aleatório e retorna token/URL assinada. O navegador envia o a
 
 ## Materiais
 
-| Método | Rota                          | Corpo/resultado                                                                         |
-| ------ | ----------------------------- | --------------------------------------------------------------------------------------- |
-| `GET`  | `/api/classes/:id/materials`  | Lista versões e estado.                                                                 |
-| `POST` | `/api/classes/:id/materials`  | `{ material_type }`; `notes`, `summary`, `flashcards`, `questions`, `mindmap` ou `pdf`. |
-| `GET`  | `/api/materials/:id/download` | Redireciona para URL assinada curta do export privado.                                  |
+| Método  | Rota                            | Corpo/resultado                                                                         |
+| ------- | ------------------------------- | --------------------------------------------------------------------------------------- |
+| `GET`   | `/api/classes/:id/materials`    | Lista versões e estado.                                                                 |
+| `POST`  | `/api/classes/:id/materials`    | `{ material_type }`; `notes`, `summary`, `flashcards`, `questions`, `mindmap` ou `pdf`. |
+| `GET`   | `/api/materials/:id/download`   | Redireciona para URL assinada curta do export privado.                                  |
+| `POST`  | `/api/materials/:id/pdf-upload` | Autoriza a renderização cliente e retorna URL assinada de upload.                       |
+| `PATCH` | `/api/materials/:id/pdf-upload` | Confirma o objeto PDF ou registra falha segura.                                         |
 
 A geração retorna `202`. Um material pendente do mesmo tipo é reutilizado; uma nova versão só nasce após a anterior terminar. O endpoint rejeita transcrição ausente, segmentos não revisados e issues abertas.
 
 O PDF exige uma apostila (`notes`) concluída na mesma versão da transcrição. Ele reutiliza esse conteúdo estruturado, sem repetir a chamada paga, e acrescenta a transcrição integral.
+
+No modo Cloudflare, jobs criados são persistidos primeiro e somente o `job_id` é enviado à Queue. Se a entrega falhar, o cron recupera o job; handlers nunca colocam áudio ou transcrição na mensagem. A geração PDF é autorizada pelo servidor, executada no navegador com `pdf-lib` e concluída somente depois que o Storage confirma o objeto privado.
 
 ## Códigos usuais
 

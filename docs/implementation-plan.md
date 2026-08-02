@@ -1,5 +1,23 @@
 # Plano de implementação
 
+## Trilha ativa — edição Free Cloud
+
+1. **Concluído:** confirmar Supabase Free em São Paulo, Cloudflare Free e remoto
+   GitHub.
+2. **Em andamento:** registrar arquitetura, limites e recuperação de entrega.
+3. Adicionar build OpenNext, configuração Wrangler e tipos de bindings.
+4. Adicionar produtor/consumidor Cloudflare Queue com payload mínimo e claim por ID.
+5. Implementar preparo compatível com a primeira cota gratuita e transcrição pelo
+   Workers AI.
+6. Implementar revisão e materiais com JSON Mode e validação Zod estrita.
+7. Mover PDF/CSV para geração no navegador e Storage privado.
+8. Aplicar migrations no Supabase hospedado e configurar buckets/RLS/Auth.
+9. Publicar no subdomínio `workers.dev` e executar o fluxo E2E.
+10. Medir cotas, armazenamento e memória antes de ampliar o tamanho das aulas.
+
+Nenhuma etapa habilita cobrança automática. O provider fake continua sendo usado
+nos testes comuns.
+
 ## Princípios
 
 - Entregar uma vertical real antes de ampliar o produto.

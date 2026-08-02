@@ -21,6 +21,10 @@ Cobertura focada:
 - CSV Anki separado por ponto e vírgula e com escaping;
 - filtro de ownership;
 - seek do player (`start_ms / 1000`).
+- normalização dos segmentos retornados pelo Workers AI;
+- ack/retry/duplicidade da Cloudflare Queue;
+- validação integral dos IDs de revisão e referências dos materiais;
+- PDF no navegador, incluindo capa e múltiplas páginas.
 
 Executar somente unitários TS:
 
@@ -88,13 +92,16 @@ Use uma base local descartável:
 pnpm exec supabase db reset --local
 ```
 
-Esse comando deve aplicar as quatro migrations e `supabase/seed.sql` sem erro.
+Esse comando deve aplicar todas as migrations append-only, incluindo RPCs do consumidor Cloudflare, e `supabase/seed.sql` sem erro.
 
-## Resultado de referência da entrega
+## Build Cloudflare
 
-- Vitest: 3 arquivos, 6 testes aprovados.
-- Pytest: 14 aprovados, 2 integrações opt-in ignoradas.
-- Playwright E2E: 1 aprovado, incluindo todos os materiais e PDF.
-- Next.js: build de produção aprovado com 15 páginas/handlers coletados.
+Além dos quatro gates, a implantação gratuita exige:
 
-Os números podem crescer; o critério é saída zero dos quatro gates.
+```powershell
+pnpm --filter @aula-clara/web build:cloudflare
+```
+
+O build comprova que o adaptador OpenNext, o consumer da Queue, o cron e o binding Workers AI são compatíveis com o runtime publicado. Os totais de testes são registrados na entrega; o critério permanente é saída zero dos gates.
+
+No Windows nativo, o OpenNext pode falhar ao recriar symlinks do pnpm. O workflow `.github/workflows/ci.yml` executa esse gate em Linux, ambiente suportado pelo adaptador. A validação local equivalente pode ser feita por WSL ou container Linux. O dry-run do Wrangler também deve permanecer abaixo do limite comprimido do plano gratuito.

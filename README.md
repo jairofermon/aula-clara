@@ -1,128 +1,134 @@
 # Aula Clara
 
-Vertical funcional de um produto educacional que recebe uma gravação de aula, prepara o áudio com FFmpeg, transcreve em segmentos com tempos numéricos, conduz uma revisão humana conservadora e gera apostila, resumo, flashcards, questões, mapa mental e PDF.
+Vertical funcional web para transformar uma aula gravada em transcrição revisável, apostila, resumo, flashcards, questões, mapa mental e PDF.
 
-O fluxo principal usa Supabase real local (Auth, PostgreSQL e Storage privado), fila persistida e worker Python. `PROVIDER_MODE=fake` substitui somente as chamadas pagas e é determinístico; FFmpeg, banco, uploads, locks, revisão, materiais e PDF continuam reais.
-
-## Arquitetura em um minuto
+O caminho principal de publicação não exige servidor local nem OpenAI API paga:
 
 ```text
-Browser → Next.js App Router → Supabase Auth/PostgreSQL (RLS)
-   └─ upload direto por URL assinada → Storage privado
-
-PostgreSQL processing_jobs → worker Python
-   ├─ FFmpeg/ffprobe → chunks FLAC sobrepostos
-   ├─ TranscriptionProvider → segmentos em ms
-   ├─ revisão e materiais com schemas Pydantic estritos
-   └─ HTML escapado → Playwright/Chromium → PDF privado
+Navegador → Cloudflare Workers/OpenNext → Supabase Auth/PostgreSQL/Storage
+                              ↓
+                   Cloudflare Queue + Workers AI
+                              ↓
+           transcrição, revisão e materiais persistidos
 ```
 
-Detalhes: [arquitetura](docs/architecture.md), [pipeline](docs/processing-pipeline.md), [modelo de dados](docs/data-model.md) e [segurança](docs/privacy-and-security.md).
+A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui créditos da OpenAI API. Por isso, a implantação gratuita usa Workers AI; `OPENAI_API_KEY` permanece opcional e exclusiva do worker Python local.
+
+## O que já funciona
+
+- cadastro, login, logout, recuperação de senha e rotas privadas;
+- disciplinas, aulas e uploads privados por URL assinada;
+- hash SHA-256, validação de MIME/extensão/tamanho e deduplicação;
+- fila persistida no PostgreSQL, entrega por Cloudflare Queue e recuperação por cron;
+- transcrição com timestamps numéricos, revisão conservadora e pendências;
+- player sincronizado, busca, edição, confirmação e proteção contra perda;
+- apostila, resumo, flashcards/CSV, questões e mapa mental;
+- PDF gerado no navegador e enviado ao bucket privado;
+- URLs de download de curta duração, diagnóstico, auditoria e logs sem conteúdo integral;
+- provider falso determinístico para testes e worker Python/FFmpeg como caminho local opcional.
+
+Detalhes: [arquitetura](docs/architecture.md), [pipeline](docs/processing-pipeline.md), [modelo de dados](docs/data-model.md), [deploy gratuito](docs/deployment.md) e [segurança](docs/privacy-and-security.md).
 
 ## Versões escolhidas
 
-- Node.js 22+, pnpm 10.15.1, Next.js 16.2.12, React 19.2.8.
-- TypeScript 6.0.3 em modo estrito, Tailwind CSS 4.3.3, ESLint 9.39.2, Prettier 3.9.6.
-- Vitest 4.1.10 e Playwright 1.62.1.
-- Python 3.12, FastAPI 0.128.0, Pydantic 2.12.5, psycopg 3.3.2, OpenAI 2.20.0 e pytest 9.0.2.
-- Supabase CLI 2.111.0; PostgreSQL local 17; FFmpeg 7 no container do worker.
+- Node.js 22+, pnpm 10.15.1, Next.js 16.2.12, React 19.2.8;
+- TypeScript 6.0.3 estrito, Tailwind CSS 4.3.3, ESLint 9.39.2 e Prettier 3.9.6;
+- OpenNext Cloudflare 1.20.2, Wrangler 4.118.0 e pdf-lib 1.17.1;
+- Vitest 4.1.10 e Playwright 1.62.1;
+- Python 3.12, FastAPI 0.128.0, Pydantic 2.12.5, psycopg 3.3.2, OpenAI 2.20.0 e pytest 9.0.2;
+- Supabase CLI 2.111.0 e PostgreSQL 17 no ambiente local de validação.
 
-As versões exatas e transitivas estão em `pnpm-lock.yaml` e `services/worker/pyproject.toml`. As decisões de compatibilidade estão em `docs/decisions/`.
+As versões transitivas estão travadas em `pnpm-lock.yaml` e `services/worker/pyproject.toml`.
 
-## Pré-requisitos
+## Publicar sem custo
 
-- Node.js 22 ou superior e Corepack.
-- Python 3.12.
-- Docker Desktop com o daemon ativo.
-- Git. FFmpeg e Chromium não precisam estar no host quando o worker roda pelo Compose.
+Você precisa de contas gratuitas no GitHub, Supabase e Cloudflare. Não cole chaves secretas no chat nem faça commit delas.
 
-## Instalação e configuração
-
-PowerShell, a partir da raiz:
+### 1. Instalar o projeto
 
 ```powershell
 corepack enable
 corepack prepare pnpm@10.15.1 --activate
 pnpm install --frozen-lockfile
-
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e "services/worker[test]"
-
-Copy-Item .env.example .env
-pnpm exec supabase start
-pnpm exec supabase status -o env
 ```
 
-Copie do último comando `API_URL` para `NEXT_PUBLIC_SUPABASE_URL`, `ANON_KEY` para `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SERVICE_ROLE_KEY` para `SUPABASE_SERVICE_ROLE_KEY` e `DB_URL` para `SUPABASE_DB_URL` no `.env`. Depois:
+### 2. Vincular e migrar o Supabase
+
+O projeto informado usa o ref `rctuenfnwlzmmpyjzhmq` na região São Paulo.
 
 ```powershell
-pnpm configure:web
+pnpm exec supabase login
+pnpm exec supabase link --project-ref rctuenfnwlzmmpyjzhmq
+pnpm exec supabase db push
 ```
 
-Esse script cria `apps/web/.env.local` somente com variáveis públicas e limites; ele exclui a service role e a chave OpenAI. `.env` e `.env.local` são ignorados pelo Git.
+No painel do Supabase, copie a URL do projeto e a chave pública/anon. A service role é segredo e será cadastrada apenas no Cloudflare.
 
-## Migrations e Supabase
-
-`supabase start` aplica as migrations automaticamente. Para comprovar uma instalação limpa ou reaplicar tudo:
+### 3. Configurar o Cloudflare
 
 ```powershell
-pnpm exec supabase db reset --local
+pnpm --filter @aula-clara/web exec wrangler login
+pnpm --filter @aula-clara/web exec wrangler queues create aula-clara-processing
+pnpm --filter @aula-clara/web exec wrangler queues create aula-clara-processing-dlq
 ```
 
-Studio: `http://127.0.0.1:54323`. Mailpit para recuperação de senha: `http://127.0.0.1:54324`.
-
-## Executar localmente
-
-Forma recomendada, com web no host para hot reload e worker com FFmpeg/Chromium no Docker:
-
-```powershell
-# terminal 1
-pnpm dev
-
-# terminal 2
-docker compose up --build worker
-```
-
-A aplicação fica em `http://localhost:3000`. O provider falso é o padrão seguro. Para executar web e worker em containers:
-
-```powershell
-docker compose up --build web worker
-```
-
-Para rodar o worker no host, instale FFmpeg no `PATH`, instale o Chromium do Playwright e execute:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m playwright install chromium
-aula-clara-worker
-```
-
-## Processar o áudio de exemplo
-
-```powershell
-pnpm example:audio
-```
-
-Depois, cadastre-se, crie uma disciplina, abra **Nova aula** e envie `tests/fixtures/aula-exemplo.wav`. Com `PROVIDER_MODE=fake`, o worker gera dois segmentos, uma pendência de revisão e todos os materiais sem custo externo.
-
-## Usar a OpenAI
-
-Preencha apenas no `.env` do worker:
+Crie `apps/web/.secrets.production`, arquivo ignorado pelo Git, com somente:
 
 ```text
-PROVIDER_MODE=openai
-OPENAI_API_KEY=...
-OPENAI_TRANSCRIPTION_MODEL=gpt-4o-transcribe-diarize
-OPENAI_REVIEW_MODEL=gpt-5.6
-OPENAI_GENERATION_MODEL=gpt-5.6
+SUPABASE_SERVICE_ROLE_KEY=<service-role-do-painel-supabase>
 ```
 
-Modelos são centralizados por configuração. O provider de transcrição também aceita `whisper-1` e modos não diarizados. Nenhum teste comum chama APIs pagas.
+Não envie esse arquivo a ninguém. O deploy o transmite criptografado junto com a primeira versão do Worker; `SUPABASE_URL` já está versionada por ser pública e a chave anon fica no build público.
+
+### 4. Informar as variáveis públicas de build
+
+Crie `apps/web/.env.production.local` — arquivo ignorado pelo Git:
+
+```text
+NEXT_PUBLIC_APP_URL=https://aula-clara.<sua-conta>.workers.dev
+NEXT_PUBLIC_SUPABASE_URL=https://rctuenfnwlzmmpyjzhmq.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<chave pública do Supabase>
+PROCESSING_DISPATCH_MODE=cloudflare
+MAX_UPLOAD_SIZE_MB=15
+SIGNED_URL_TTL_SECONDS=300
+```
+
+### 5. Fazer build e publicar
+
+```powershell
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm --filter @aula-clara/web build:cloudflare
+pnpm --filter @aula-clara/web deploy:cloudflare
+```
+
+Depois do deploy, apague `apps/web/.secrets.production` do computador se não quiser mantê-lo localmente; o segredo continuará criptografado no Cloudflare.
+
+### 6. Fechar a autenticação
+
+No Supabase, em **Authentication → URL Configuration**, defina o endereço publicado como Site URL e adicione:
+
+```text
+https://aula-clara.<sua-conta>.workers.dev/auth/callback
+https://aula-clara.<sua-conta>.workers.dev/update-password
+```
+
+O roteiro completo, incluindo teste real e solução de erros, está em [docs/deployment.md](docs/deployment.md).
+
+## Limites deliberados da publicação gratuita
+
+- upload inicial limitado a 15 MB por áudio para manter uma única chamada de transcrição;
+- sem diarização: falante fica nulo quando o modelo não o identifica;
+- sem FFmpeg no Cloudflare nesta etapa; vídeos/áudios que exijam conversão devem ser convertidos antes do envio;
+- PDF é produzido no navegador, sem Chromium pago no servidor;
+- cotas gratuitas podem pausar o processamento até a renovação; não existe fallback automático para serviço pago;
+- o Supabase gratuito pode pausar projeto inativo e possui limites de banco/Storage.
+
+O caminho Python local continua disponível para chunks com FFmpeg, provider OpenAI opcional e PDF por Playwright. Consulte [desenvolvimento local](docs/local-development.md) somente se quiser usá-lo.
 
 ## Qualidade
-
-Os quatro gates pedidos:
 
 ```powershell
 pnpm lint
@@ -131,7 +137,13 @@ pnpm test
 pnpm build
 ```
 
-E2E completo, com Supabase, web e worker fake já ativos:
+Cloudflare:
+
+```powershell
+pnpm --filter @aula-clara/web build:cloudflare
+```
+
+E2E completo com infraestrutura controlada:
 
 ```powershell
 $env:RUN_E2E='1'
@@ -139,51 +151,37 @@ $env:PLAYWRIGHT_CHANNEL='chrome'
 pnpm test:e2e
 ```
 
-Integração opcional paga:
+Nenhum teste comum chama API paga. Veja [docs/testing.md](docs/testing.md).
 
-```powershell
-$env:RUN_OPENAI_INTEGRATION='1'
-python -m pytest services/worker/tests -m integration
-```
+## Variáveis principais
 
-Veja [testing](docs/testing.md) para a matriz completa.
+| Variável                        | Onde               | Uso                                             |
+| ------------------------------- | ------------------ | ----------------------------------------------- |
+| `NEXT_PUBLIC_APP_URL`           | build web          | URL pública e callbacks.                        |
+| `NEXT_PUBLIC_SUPABASE_URL`      | build web          | URL pública da API Supabase.                    |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | build/runtime web  | Chave publicável protegida por RLS.             |
+| `SUPABASE_URL`                  | segredo Cloudflare | API usada pelo consumidor.                      |
+| `SUPABASE_SERVICE_ROLE_KEY`     | segredo Cloudflare | Acesso exclusivo do consumidor às RPCs/Storage. |
+| `PROCESSING_DISPATCH_MODE`      | web                | `cloudflare` na publicação; `postgres` local.   |
+| `CLOUDFLARE_*_MODEL`            | Worker             | Modelos centralizados do Workers AI.            |
+| `MAX_UPLOAD_SIZE_MB`            | web/Worker         | Limite inicial gratuito, padrão 15.             |
+| `SIGNED_URL_TTL_SECONDS`        | web                | Validade dos downloads privados.                |
+| `OPENAI_API_KEY`                | Python opcional    | Nunca necessária no caminho gratuito.           |
 
-## Variáveis de ambiente
-
-| Variável                             | Uso                                              |
-| ------------------------------------ | ------------------------------------------------ |
-| `NEXT_PUBLIC_APP_URL`                | Origem pública e callbacks de autenticação.      |
-| `NEXT_PUBLIC_SUPABASE_URL`           | URL pública da API Supabase.                     |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY`      | Chave publicável protegida por RLS.              |
-| `SUPABASE_INTERNAL_URL`              | URL opcional usada de dentro dos containers.     |
-| `SUPABASE_SERVICE_ROLE_KEY`          | Segredo usado somente pelo worker para Storage.  |
-| `SUPABASE_DB_URL`                    | Conexão PostgreSQL direta do worker.             |
-| `OPENAI_API_KEY`                     | Segredo do provider OpenAI; vazio no modo fake.  |
-| `OPENAI_TRANSCRIPTION_MODEL`         | Modelo de transcrição.                           |
-| `OPENAI_REVIEW_MODEL`                | Modelo de revisão estruturada.                   |
-| `OPENAI_GENERATION_MODEL`            | Modelo dos materiais.                            |
-| `PROVIDER_MODE`                      | `fake` ou `openai`.                              |
-| `AUDIO_CHUNK_TARGET_SECONDS`         | Duração-alvo dos chunks; padrão 600.             |
-| `AUDIO_CHUNK_OVERLAP_SECONDS`        | Sobreposição; padrão 5.                          |
-| `MAX_UPLOAD_SIZE_MB`                 | Limite do upload original.                       |
-| `MAX_TRANSCRIPTION_CHUNK_MB`         | Limite interno antes do provider.                |
-| `SIGNED_URL_TTL_SECONDS`             | Validade de URLs privadas.                       |
-| `WORKER_ID`                          | Identidade registrada nos locks.                 |
-| `WORKER_POLL_SECONDS`                | Intervalo de busca por jobs.                     |
-| `WORKER_LOCK_TTL_SECONDS`            | Lease do job em segundos.                        |
-| `LOG_LEVEL`                          | Nível dos logs JSON.                             |
-| `OPENAI_*_COST_*`                    | Tarifas opcionais usadas apenas para estimativa. |
-| `RUN_E2E` / `RUN_OPENAI_INTEGRATION` | Habilitam testes opt-in.                         |
+A lista completa e comentada está em [.env.example](.env.example).
 
 ## Documentação
 
-- [Desenvolvimento local](docs/local-development.md)
+- [Arquitetura](docs/architecture.md)
+- [Plano](docs/implementation-plan.md)
+- [Modelo de dados](docs/data-model.md)
+- [Pipeline](docs/processing-pipeline.md)
+- [Privacidade e segurança](docs/privacy-and-security.md)
 - [API](docs/api.md)
-- [Testes](docs/testing.md)
 - [Prompts](docs/prompts.md)
+- [Testes](docs/testing.md)
 - [Deploy](docs/deployment.md)
-- [Plano de implementação](docs/implementation-plan.md)
 
-## Limites do MVP
+## Fora do MVP
 
-Sem cobrança, times, compartilhamento, OCR, app móvel, edição colaborativa, antivírus, painel administrativo ou automação de retenção. A exclusão de disciplina é bloqueada quando existem aulas; a exclusão lógica da aula está preparada no modelo, mas a UI de ciclo de vida não faz parte desta vertical.
+Cobrança, equipes, compartilhamento, OCR, app móvel, edição colaborativa, antivírus, painel administrativo e garantia de retenção/compliance médico. A exclusão de disciplina é bloqueada quando existem aulas, evitando perda acidental.
