@@ -93,7 +93,7 @@ Esse comando deve aplicar as quatro migrations e `supabase/seed.sql` sem erro.
 ## Resultado de referência da entrega
 
 - Vitest: 3 arquivos, 6 testes aprovados.
-- Pytest: 12 aprovados, 2 integrações opt-in ignoradas.
+- Pytest: 14 aprovados, 2 integrações opt-in ignoradas.
 - Playwright E2E: 1 aprovado, incluindo todos os materiais e PDF.
 - Next.js: build de produção aprovado com 15 páginas/handlers coletados.
 

@@ -56,6 +56,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       "review_required"
     );
   const type = parsed.data.material_type;
+  let notesMaterialId: string | null = null;
+  if (type === "pdf") {
+    const { data: notes } = await context.supabase
+      .from("materials")
+      .select("id")
+      .eq("class_id", id)
+      .eq("user_id", context.user.id)
+      .eq("material_type", "notes")
+      .eq("status", "completed")
+      .eq("source_transcript_version", klass.transcript_version)
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!notes) return apiError("Gere a apostila antes de exportar o PDF.", 409, "notes_required");
+    notesMaterialId = notes.id;
+  }
   const { data: latest } = await context.supabase
     .from("materials")
     .select("version,status")
@@ -91,7 +107,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     status: "pending",
     stage: "queued",
     idempotency_key: `${jobType}:${id}:t${klass.transcript_version}:v${version}`,
-    input_json: { material_id: material.id, transcript_version: klass.transcript_version }
+    input_json: {
+      material_id: material.id,
+      transcript_version: klass.transcript_version,
+      ...(notesMaterialId ? { notes_material_id: notesMaterialId } : {})
+    }
   });
   if (jobError)
     return apiError("O material foi registrado, mas a fila falhou. Use repetir etapa.", 500);

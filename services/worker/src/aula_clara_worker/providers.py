@@ -289,5 +289,5 @@ class FakeProvider(TranscriptionProvider, ContentProvider):
         if material_type == "mindmap":
             return MindmapContent(title=title, root=MindmapNode(id="root", label=title, children=[MindmapNode(id="c1", label="Conceito principal")]), mermaid=f"mindmap\n  root(({title}))\n    Conceito principal")
         if material_type == "notes":
-            return NotesContent(title=title, chronological_index=[f"00:00 — {title}"], sections=[NotesSection(title="Transcrição comentada", body=str(first["text"]), timestamp_ms=timestamp, source_segment_ids=[segment_id])], emphasized_points=["Ponto enfatizado"], remaining_questions=[])
+            return NotesContent(title=title, chronological_index=[f"00:00 — {title}"], sections=[NotesSection(title="Transcrição comentada", body=str(first["text"]), timestamp_ms=timestamp, source_segment_ids=[segment_id])], teacher_examples=["Exemplo preservado da aula"], emphasized_points=["Ponto enfatizado"], remaining_questions=[])
         raise ValueError(f"material não suportado: {material_type}")

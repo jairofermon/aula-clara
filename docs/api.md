@@ -60,6 +60,8 @@ Cria path interno aleatório e retorna token/URL assinada. O navegador envia o a
 
 A geração retorna `202`. Um material pendente do mesmo tipo é reutilizado; uma nova versão só nasce após a anterior terminar. O endpoint rejeita transcrição ausente, segmentos não revisados e issues abertas.
 
+O PDF exige uma apostila (`notes`) concluída na mesma versão da transcrição. Ele reutiliza esse conteúdo estruturado, sem repetir a chamada paga, e acrescenta a transcrição integral.
+
 ## Códigos usuais
 
 - `400`: requisição inválida.

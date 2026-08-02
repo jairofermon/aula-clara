@@ -144,5 +144,6 @@ class NotesContent(StrictModel):
     title: str
     chronological_index: list[str]
     sections: list[NotesSection]
+    teacher_examples: list[str]
     emphasized_points: list[str]
     remaining_questions: list[str]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import time
 from decimal import Decimal
@@ -42,6 +43,8 @@ def markdown_for(material_type: str, content: BaseModel) -> str | None:
             lines.extend(["", f"## {section.title}", section.body, f"\nTimestamp: {section.timestamp_ms} ms"])
         if content.emphasized_points:
             lines.extend(["", "## Pontos enfatizados", *[f"- {item}" for item in content.emphasized_points]])
+        if content.teacher_examples:
+            lines.extend(["", "## Exemplos do professor", *[f"- {item}" for item in content.teacher_examples]])
         if content.remaining_questions:
             lines.extend(["", "## Dúvidas remanescentes", *[f"- {item}" for item in content.remaining_questions]])
         return "\n".join(lines)
@@ -257,17 +260,37 @@ class JobProcessor:
         transcript = self.repository.material_input(job["class_id"], int(material["source_transcript_version"]))
         if not transcript:
             raise ReviewRequiredError("transcrição ainda contém pendências")
+        notes_material_id = UUID(str(job["input_json"]["notes_material_id"]))
+        notes_material = self.repository.get_material(notes_material_id)
+        if (
+            str(notes_material["class_id"]) != str(job["class_id"])
+            or str(notes_material["material_type"]) != "notes"
+            or str(notes_material["status"]) != "completed"
+            or int(notes_material["source_transcript_version"])
+            != int(material["source_transcript_version"])
+        ):
+            raise ReviewRequiredError("apostila validada ausente para esta versão")
+        # JSONB returns UUID values as JSON strings. Validate from JSON so Pydantic
+        # keeps strict field validation while applying JSON's canonical UUID decode.
+        notes = NotesContent.model_validate_json(
+            json.dumps(notes_material["structured_content"], ensure_ascii=False)
+        )
         context = self.repository.get_class_context(job["class_id"])
         with tempfile.TemporaryDirectory(prefix="aula-clara-pdf-") as directory:
             destination = Path(directory) / "apostila.pdf"
-            document = build_notes_html(context, transcript, int(material["source_transcript_version"]))
+            document = build_notes_html(
+                context,
+                transcript,
+                int(material["source_transcript_version"]),
+                notes,
+            )
             started = time.monotonic()
             render_pdf(document, destination)
             duration = round((time.monotonic() - started) * 1000)
             storage_path = f"{job['user_id']}/{job['class_id']}/apostila-v{material['version']}.pdf"
             self.storage.upload("generated-exports", storage_path, destination, "application/pdf")
             pdf_size = destination.stat().st_size
-        structured = {"kind": "study-notes-pdf", "source_transcript_version": material["source_transcript_version"], "segment_count": len(transcript)}
+        structured = {"kind": "study-notes-pdf", "source_transcript_version": material["source_transcript_version"], "source_notes_material_id": str(notes_material_id), "segment_count": len(transcript)}
         self.repository.finish_material(material_id, structured, None, storage_path, "playwright-html")
         self.repository.record_operation(class_id=job["class_id"], job_id=job["id"], provider="local", model_name="playwright", operation_type="pdf", duration_ms=duration)
         return {"material_id": str(material_id), "storage_path": storage_path, "size_bytes": pdf_size}
