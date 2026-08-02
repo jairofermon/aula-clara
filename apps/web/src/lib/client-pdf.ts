@@ -1,12 +1,17 @@
-import { formatTimestamp, notesContentSchema } from "@aula-clara/shared";
+import { formatTimestamp } from "@aula-clara/shared";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 
-export interface NotesPdfInput {
+export interface TranscriptPdfInput {
   classTitle: string;
   subjectName: string;
   classDate: string;
   transcriptVersion: number;
-  notes: unknown;
+  transcript: Array<{
+    start_ms: number;
+    end_ms: number;
+    speaker_label: string | null;
+    text: string;
+  }>;
 }
 
 const PAGE_WIDTH = 595.28;
@@ -64,8 +69,8 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
   return lines;
 }
 
-export async function buildNotesPdf(input: NotesPdfInput): Promise<Uint8Array> {
-  const notes = notesContentSchema.parse(input.notes);
+export async function buildTranscriptPdf(input: TranscriptPdfInput): Promise<Uint8Array> {
+  if (!input.transcript.length) throw new Error("A transcrição está vazia.");
   const document = await PDFDocument.create();
   const regular = await document.embedFont(StandardFonts.Helvetica);
   const bold = await document.embedFont(StandardFonts.HelveticaBold);
@@ -110,8 +115,8 @@ export async function buildNotesPdf(input: NotesPdfInput): Promise<Uint8Array> {
     color: muted
   });
 
-  let page: PDFPage;
-  let y: number;
+  let page: PDFPage = cover;
+  let y = 0;
   function newContentPage() {
     page = document.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     y = PAGE_HEIGHT - 72;
@@ -137,30 +142,23 @@ export async function buildNotesPdf(input: NotesPdfInput): Promise<Uint8Array> {
     }
     y -= 5;
   }
-  function bullets(items: string[]) {
-    for (const item of items) paragraph(`- ${item}`, 10.5, 8);
-  }
-
   newContentPage();
-  heading("Índice cronológico", 21);
-  bullets(notes.chronological_index);
+  heading("Transcrição completa e corrigida", 21);
+  paragraph("Os horários abaixo permitem localizar cada trecho diretamente no áudio original.", 10);
 
-  for (const section of notes.sections) {
-    heading(section.title, 17);
-    paragraph(`Timestamp: ${formatTimestamp(section.timestamp_ms)}`, 9.5);
-    paragraph(section.body);
-  }
-  if (notes.teacher_examples.length) {
-    heading("Exemplos do professor", 17);
-    bullets(notes.teacher_examples);
-  }
-  if (notes.emphasized_points.length) {
-    heading("Pontos enfatizados", 17);
-    bullets(notes.emphasized_points);
-  }
-  if (notes.remaining_questions.length) {
-    heading("Dúvidas remanescentes", 17);
-    bullets(notes.remaining_questions);
+  for (const segment of input.transcript) {
+    ensureSpace(42);
+    const interval = `${formatTimestamp(segment.start_ms)} – ${formatTimestamp(segment.end_ms)}`;
+    const speaker = segment.speaker_label ? ` · ${segment.speaker_label}` : "";
+    page.drawText(safePdfText(`${interval}${speaker}`), {
+      x: MARGIN,
+      y,
+      size: 9.5,
+      font: bold,
+      color: green
+    });
+    y -= 17;
+    paragraph(segment.text);
   }
 
   const pages = document.getPages();
@@ -180,7 +178,7 @@ export async function buildNotesPdf(input: NotesPdfInput): Promise<Uint8Array> {
     );
   });
 
-  document.setTitle(safePdfText(notes.title));
+  document.setTitle(safePdfText(`${input.classTitle} - Transcrição corrigida`));
   document.setSubject(safePdfText(input.subjectName));
   document.setProducer("Aula Clara - pdf-lib");
   return document.save();

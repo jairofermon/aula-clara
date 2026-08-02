@@ -5,8 +5,8 @@ export const STATUS_LABELS: Record<ClassStatus, string> = {
   queued: "Aguardando processamento",
   preparing_audio: "Preparando áudio",
   transcribing: "Transcrevendo",
-  reviewing: "Revisando",
-  needs_user_review: "Aguardando conferência",
+  reviewing: "Corrigindo transcrição",
+  needs_user_review: "Finalizando correção",
   generating_materials: "Gerando materiais",
   completed: "Concluída",
   failed: "Falhou"

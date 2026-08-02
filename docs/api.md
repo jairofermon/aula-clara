@@ -41,7 +41,7 @@ Cria path interno aleatório e retorna token/URL assinada. O navegador envia o a
 
 `POST /api/uploads/complete` recebe `{ file_id }`, confirma que o objeto existe e marca o registro. Duplicatas retornam conflito antes de criar job. PDF e complementos usam os mesmos endpoints com tipos permitidos.
 
-## Transcrição e issues
+## Transcrição
 
 | Método  | Rota                          | Corpo/resultado                                                                                |
 | ------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -49,7 +49,7 @@ Cria path interno aleatório e retorna token/URL assinada. O navegador envia o a
 | `PATCH` | `/api/segments/:id`           | `{ revised_text, action }`; action: `save`, `confirm`, `keep_original` ou `accept_suggestion`. |
 | `PATCH` | `/api/issues/:id`             | `{ action: "resolve"                                                                           | "dismiss" }`. |
 
-`raw_text` não é aceito em updates. Confirmação resolve issues abertas daquele segmento e atualiza a validade da versão quando não restam pendências.
+`raw_text` não é aceito em updates. A web usa a versão corrente corrigida automaticamente; a edição permanece opcional e nunca é exigida para liberar materiais.
 
 ## Materiais
 
@@ -61,9 +61,9 @@ Cria path interno aleatório e retorna token/URL assinada. O navegador envia o a
 | `POST`  | `/api/materials/:id/pdf-upload` | Autoriza a renderização cliente e retorna URL assinada de upload.                       |
 | `PATCH` | `/api/materials/:id/pdf-upload` | Confirma o objeto PDF ou registra falha segura.                                         |
 
-A geração retorna `202`. Um material pendente do mesmo tipo é reutilizado; uma nova versão só nasce após a anterior terminar. O endpoint rejeita transcrição ausente, segmentos não revisados e issues abertas.
+A geração retorna `202`. Um material pendente do mesmo tipo é reutilizado; uma nova versão só nasce após a anterior terminar. O endpoint rejeita transcrição ausente ou segmentos cuja correção automática ainda não terminou.
 
-O PDF exige uma apostila (`notes`) concluída na mesma versão da transcrição. Ele reutiliza esse conteúdo estruturado, sem repetir a chamada paga, e acrescenta a transcrição integral.
+O PDF usa diretamente a transcrição corrigida com timestamps e não depende da apostila nem de uma chamada adicional de IA.
 
 No modo Cloudflare, jobs criados são persistidos primeiro e somente o `job_id` é enviado à Queue. Se a entrega falhar, o cron recupera o job; handlers nunca colocam áudio ou transcrição na mensagem. A geração PDF é autorizada pelo servidor, executada no navegador com `pdf-lib` e concluída somente depois que o Storage confirma o objeto privado.
 

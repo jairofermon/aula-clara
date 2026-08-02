@@ -27,7 +27,7 @@ opcional. A decisão completa está em
 
 ## Objetivo
 
-A primeira vertical do Aula Clara transforma áudio de aula e materiais opcionais em uma transcrição revisável e em materiais de estudo. O desenho privilegia persistência, retomada e segurança por proprietário. O desenvolvimento local continua disponível, mas não é requisito para o usuário final.
+A primeira vertical do Aula Clara transforma áudio de aula e materiais opcionais em uma transcrição corrigida automaticamente e em materiais de estudo. O desenho privilegia persistência, retomada e segurança por proprietário. O desenvolvimento local continua disponível, mas não é requisito para o usuário final.
 
 ## Componentes
 
@@ -70,9 +70,9 @@ Worker Python/FastAPI
 5. O worker toma o job, baixa o áudio para diretório temporário, valida com ffprobe e gera blocos mono a 16 kHz, com alvo e sobreposição configuráveis.
 6. Cada chunk persistido cria um job `transcribe_chunk`. O provider retorna segmentos locais, convertidos para milissegundos globais.
 7. `assemble_transcript` ordena e remove somente duplicações sustentadas pela janela de sobreposição.
-8. `review_transcript` escreve apenas `revised_text`, issues e status, preservando `raw_text`.
+8. A versão original permanece imutável; aulas com muitos microsegmentos ganham uma versão compacta e `review_transcript` escreve a correção final em `revised_text`.
 9. Materiais são jobs independentes e versionados. Cada um usa o texto efetivo validado (`revised_text`/confirmado; nunca substitui o bruto).
-10. `generate_pdf` renderiza HTML controlado para PDF e armazena o resultado no bucket privado.
+10. Na web gratuita, `generate_pdf` monta o PDF da transcrição corrigida no navegador e o armazena no bucket privado.
 
 ## Estratégia de retomada
 

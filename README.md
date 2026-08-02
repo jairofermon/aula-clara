@@ -1,6 +1,6 @@
 # Aula Clara
 
-Vertical funcional web para transformar uma aula gravada em transcrição revisável, apostila, resumo, flashcards, questões, mapa mental e PDF.
+Vertical funcional web para transformar uma aula gravada em transcrição corrigida automaticamente, apostila, resumo, flashcards, questões, mapa mental e PDF.
 
 O caminho principal de publicação não exige servidor local nem OpenAI API paga:
 
@@ -20,10 +20,10 @@ A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui crédit
 - disciplinas, aulas e uploads privados por URL assinada;
 - hash SHA-256, validação de MIME/extensão/tamanho e deduplicação;
 - fila persistida no PostgreSQL, entrega por Cloudflare Queue e recuperação por cron;
-- transcrição com timestamps numéricos, revisão conservadora e pendências;
-- player sincronizado, busca, edição, confirmação e proteção contra perda;
+- transcrição com timestamps numéricos, compactação de microsegmentos e correção automática;
+- player sincronizado, busca e edição opcional com proteção contra perda;
 - apostila, resumo, flashcards/CSV, questões e mapa mental;
-- PDF gerado no navegador e enviado ao bucket privado;
+- pacote completo em um clique e PDF da transcrição gerado no navegador;
 - URLs de download de curta duração, diagnóstico, auditoria e logs sem conteúdo integral;
 - provider falso determinístico para testes e worker Python/FFmpeg como caminho local opcional.
 

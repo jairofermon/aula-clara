@@ -1,6 +1,6 @@
 # ADR 0005: Materiais somente após validação
 
-- Status: aceita
+- Status: substituída pela ADR 0008
 - Data: 2026-08-01
 
 ## Decisão

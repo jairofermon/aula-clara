@@ -24,8 +24,7 @@ prepare_audio
 assemble_transcript
           ↓
 review_transcript
-          ├─ needs_user_review
-          └─ pronto para materiais
+          └─ transcrição corrigida pronta
 
 generate_notes ─┐
 generate_summary ├─ independentes e versionados
@@ -82,26 +81,28 @@ Título, disciplina, professor, glossário e texto extraído dos slides formam u
 
 ## Revisão
 
-Segmentos são enviados em lotes de até 24 itens. Para evitar que o modelo copie incorretamente UUIDs longos, cada chamada usa índices curtos e ordenados; o servidor associa os índices de volta aos IDs imutáveis. A resposta passa por schema Zod/Pydantic estrito. O lote inteiro é descartado se houver índice ausente/desconhecido, duplicação, campo extra inválido ou valor fora de faixa. Quando o modelo não preserva todos os índices ou devolve JSON/schema inválido, o worker subdivide o lote recursivamente e valida cada novo lote antes de persistir, evitando repetir trechos já revisados.
+O Whisper pode devolver centenas de fragmentos de poucos segundos. Quando a versão original ultrapassa 200 segmentos, o pipeline preserva essa versão 1 para auditoria e cria uma versão operacional compacta, agrupando 12 fragmentos consecutivos. Os limites globais em milissegundos continuam exatos e a tela deixa de exibir centenas de cartões sem contexto.
+
+Os segmentos operacionais são enviados em lotes de até 24 itens. Para evitar que o modelo copie incorretamente UUIDs longos, cada chamada usa índices curtos e ordenados; o servidor associa os índices de volta aos IDs imutáveis. A resposta final contém somente índice, texto corrigido e confiança e passa por schema Zod estrito. O lote inteiro é descartado se houver índice ausente/desconhecido, duplicação, campo extra inválido ou valor fora de faixa. Quando o modelo não preserva todos os índices ou devolve JSON/schema inválido, o worker subdivide o lote recursivamente e valida cada novo lote antes de persistir, evitando repetir trechos já corrigidos.
 
 Para aulas longas, cada entrega da Queue processa no máximo dez lotes. O worker então persiste uma continuação, libera o lock e reenfileira o mesmo `job_id` sem contabilizar a continuação como falha. O cron consulta jobs pendentes, retries vencidos e jobs `running`; a função transacional de claim só aceita estes últimos quando o lock expirou. Assim, ele continua sendo a rede de segurança caso a nova mensagem não seja entregue ou um worker seja interrompido.
 
-Trechos revisados sem alerta recebem `auto_reviewed` e não exigem confirmação manual. Somente segmentos classificados como `needs_review`, com uma pendência aberta, interrompem o fluxo para conferência humana. O usuário ainda pode editar qualquer trecho aprovado automaticamente; a edição é salva como `user_edited`.
+Todo trecho corrigido recebe `auto_reviewed` e não exige confirmação manual. Incerteza do modelo não interrompe o fluxo: ele preserva a formulação mais fiel e o timestamp permite a conferência opcional no áudio. O usuário ainda pode editar qualquer trecho; a edição é salva como `user_edited`.
 
-`raw_text` nunca é alterado. `revised_text`, confiança, status e issues são gravados na mesma transação. A aula entra em `needs_user_review` quando houver issue aberta; caso contrário fica pronta para materiais.
+`raw_text` nunca é alterado. `revised_text`, confiança e status são gravados na mesma transação. Ao concluir todos os lotes, a aula fica pronta para materiais automaticamente.
 
 ## Texto efetivo
 
 Para materiais, cada segmento usa:
 
-1. texto editado/confirmado pelo usuário;
-2. `revised_text` auto-revisado sem pendência;
-3. `raw_text` apenas quando explicitamente confirmado como original.
+1. texto editado pelo usuário, se houver;
+2. `revised_text` corrigido automaticamente;
+3. `raw_text` somente enquanto o lote ainda não foi corrigido.
 
-Se existir pendência aberta, a geração é recusada para não usar transcrição não validada.
+A geração é liberada assim que não existem segmentos `unreviewed` na versão corrente.
 
 ## PDF
 
-No deploy gratuito, o servidor autoriza a operação e entrega apenas a apostila validada do proprietário. O navegador monta o PDF com `pdf-lib`, incluindo capa, índice cronológico, cabeçalho/rodapé, timestamps, versão e paginação, e envia o binário diretamente por URL assinada ao bucket `generated-exports`. Uma segunda chamada confirma a presença do objeto antes de marcar o material como concluído.
+No deploy gratuito, o servidor autoriza a operação e entrega somente a transcrição corrigida do proprietário. O navegador monta o PDF com `pdf-lib`, incluindo capa, cabeçalho/rodapé, timestamps, versão e paginação, e envia o binário diretamente por URL assinada ao bucket `generated-exports`. O PDF não depende de outra chamada de IA. Uma segunda chamada confirma a presença do objeto antes de marcar o material como concluído.
 
 No worker Python local, o caminho equivalente monta HTML escapado e usa Chromium headless pelo Playwright. Em nenhum modo o modelo produz binário PDF.

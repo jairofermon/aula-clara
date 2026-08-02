@@ -47,7 +47,7 @@ function rpcFailure(errorCode: string): never {
     review_segment_conflict: ["A revisão foi atualizada em outra execução e será retomada.", true],
     invalid_material: ["A referência do material é inválida.", false],
     material_missing: ["O material solicitado não foi encontrado.", false],
-    review_required: ["Confirme as pendências antes de gerar materiais.", false],
+    review_required: ["A correção automática ainda está sendo concluída.", true],
     transcript_missing: ["A transcrição validada não foi encontrada.", false],
     job_not_claimed: ["O job perdeu o lock e será recuperado com segurança.", true]
   };

@@ -3,7 +3,6 @@ import {
   mindmapContentSchema,
   notesContentSchema,
   questionsContentSchema,
-  reviewIssueSchema,
   summaryContentSchema
 } from "@aula-clara/shared";
 import { REVIEW_RULES } from "@aula-clara/prompts";
@@ -21,19 +20,9 @@ const indexedReviewedSegmentSchema = z
   .object({
     index: z.number().int().nonnegative(),
     revised_text: z.string().trim().min(1),
-    needs_review: z.boolean(),
-    confidence: z.number().min(0).max(1),
-    issues: z.array(reviewIssueSchema)
+    confidence: z.number().min(0).max(1)
   })
-  .strict()
-  .superRefine((segment, context) => {
-    if (segment.needs_review !== segment.issues.length > 0) {
-      context.addIssue({
-        code: "custom",
-        message: "needs_review deve corresponder à existência de issues"
-      });
-    }
-  });
+  .strict();
 
 const indexedReviewBatchSchema = z
   .object({ segments: z.array(indexedReviewedSegmentSchema).min(1) })
@@ -138,7 +127,7 @@ export async function reviewWithWorkersAi(
     env,
     env.CLOUDFLARE_REVIEW_MODEL,
     indexedReviewBatchSchema,
-    `${REVIEW_RULES} Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. needs_review deve ser verdadeiro se e somente se issues não estiver vazia. Não use HTML.`,
+    `${REVIEW_RULES} Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
     {
       segments: segments.map((segment, index) => ({
         index,

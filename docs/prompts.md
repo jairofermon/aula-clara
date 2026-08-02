@@ -8,27 +8,27 @@ Prompts são tratados como interfaces versionadas. O texto gerado nunca é autor
 
 | Produto              | Versão          |
 | -------------------- | --------------- |
-| Revisão              | `review-v1`     |
+| Correção automática  | `review-v3`     |
 | Apostila estruturada | `notes-v1`      |
 | Resumo               | `summary-v1`    |
 | Flashcards           | `flashcards-v1` |
-| Questões             | `questions-v1`  |
-| Mapa mental          | `mindmap-v1`    |
+| Questões             | `questions-v2`  |
+| Mapa mental          | `mindmap-v2`    |
 
 As constantes de produto ficam em `packages/prompts/src/index.ts`; `materials.prompt_version` registra a versão usada. O consumidor Workers AI usa JSON Mode com JSON Schema derivado do Zod compartilhado. O provider Python mantém os schemas Pydantic equivalentes. Em ambos os caminhos, validação e persistência são separadas.
 
-## Revisão conservadora
+## Correção automática
 
 Invariantes:
 
 - preservar IDs, ordem, sentido e exemplos;
 - não resumir nem introduzir conhecimento externo;
 - corrigir somente pontuação, português evidente e termos com confiança;
-- marcar nomes, números, dosagens, termos técnicos e trechos sem sentido;
-- `needs_review=true` exatamente quando existem issues;
+- corrigir o texto para uma versão final utilizável, sem resumir;
+- em incerteza, preservar a formulação mais fiel em vez de inventar;
 - retornar todos os índices curtos do lote uma vez; o servidor os associa aos IDs imutáveis.
 
-`ReviewBatch` valida a resposta. Índices ausentes, extras ou duplicados rejeitam integralmente aquela resposta; nada dela é salvo parcialmente. No caminho Cloudflare, o worker subdivide automaticamente um lote inconsistente e cada nova resposta válida é associada aos IDs reais e aplicada por uma RPC transacional. Trechos sem issues seguem como `auto_reviewed`, sem confirmação manual; somente `needs_review` exige ação humana. `raw_text` permanece imutável.
+O schema valida índice, `revised_text` e confiança. Índices ausentes, extras ou duplicados rejeitam integralmente aquela resposta; nada dela é salvo parcialmente. No caminho Cloudflare, o worker subdivide automaticamente um lote inconsistente e cada nova resposta válida é associada aos IDs reais e aplicada por uma RPC transacional. Todos os trechos seguem como `auto_reviewed`, sem confirmação manual. `raw_text` permanece imutável.
 
 ## Contexto
 
@@ -66,4 +66,4 @@ Zod/Pydantic rejeitam forma, cardinalidade, IDs ou timestamps inválidos. Mermai
 
 ## Provider fake
 
-O fake é explícito, determinístico e cobre as mesmas classes de domínio. Ele gera um trecho duvidoso para exercitar conferência humana. Não é fallback silencioso quando a OpenAI falha.
+O fake é explícito, determinístico e cobre as mesmas classes de domínio. Não é fallback silencioso quando um provider real falha.

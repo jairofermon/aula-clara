@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Pause, Play, RotateCcw, Search, SkipForward } from "lucide-react";
+import { Download, Pause, Play, RotateCcw, Search } from "lucide-react";
 import {
   flashcardsToAnkiCsv,
   formatTimestamp,
@@ -67,12 +67,12 @@ function SegmentCard({
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   const persist = useCallback(
-    async (action: "save" | "confirm" | "keep_original" | "accept_suggestion", value = text) => {
+    async (value = text) => {
       setSaveState("saving");
       const response = await fetch(`/api/segments/${segment.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ revised_text: value, action })
+        body: JSON.stringify({ revised_text: value, action: "save" })
       });
       const payload = (await response.json()) as {
         data?: Pick<TranscriptSegment, "revised_text" | "review_status" | "user_confirmed">;
@@ -83,11 +83,7 @@ function SegmentCard({
       }
       const updated = {
         ...segment,
-        ...payload.data,
-        issues: segment.issues?.map((issue) => ({
-          ...issue,
-          status: payload.data?.user_confirmed ? ("resolved" as const) : issue.status
-        }))
+        ...payload.data
       };
       setText(updated.revised_text ?? updated.raw_text);
       setDirty(false);
@@ -99,7 +95,7 @@ function SegmentCard({
 
   useEffect(() => {
     if (!dirty) return;
-    const timer = window.setTimeout(() => void persist("save"), 900);
+    const timer = window.setTimeout(() => void persist(), 900);
     return () => window.clearTimeout(timer);
   }, [dirty, persist, text]);
 
@@ -110,21 +106,10 @@ function SegmentCard({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  const openIssue = segment.issues?.find((issue) => issue.status === "open");
-  const needsHumanReview = segment.review_status === "needs_review" || Boolean(openIssue);
-  const reviewLabel = segment.user_confirmed
-    ? "Confirmado"
-    : needsHumanReview
-      ? "Conferência necessária"
-      : segment.review_status === "auto_reviewed"
-        ? "Revisado pela IA"
-        : segment.review_status === "user_edited"
-          ? "Editado por você"
-          : "Aguardando revisão";
   return (
     <article
       id={`segment-${segment.id}`}
-      className={`h-[322px] overflow-auto rounded-xl border p-4 transition ${active ? "border-[#176b58] bg-[#edf5f1] shadow-md" : openIssue ? "border-amber-300 bg-amber-50/50" : "border-[#dbe4df] bg-white"}`}
+      className={`h-[250px] overflow-auto rounded-xl border p-4 transition ${active ? "border-[#176b58] bg-[#edf5f1] shadow-md" : "border-[#dbe4df] bg-white"}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -151,17 +136,17 @@ function SegmentCard({
               ? "Salvo"
               : saveState === "error"
                 ? "Falha ao salvar"
-                : reviewLabel}
+                : ""}
         </span>
       </div>
       <details className="mt-3">
         <summary className="cursor-pointer text-xs font-bold text-[#61736f]">
-          Texto bruto (preservado)
+          Ver transcrição original
         </summary>
         <p className="mt-2 rounded-lg bg-slate-50 p-3 text-sm leading-6">{segment.raw_text}</p>
       </details>
       <label className="mt-3 block">
-        <span className="label">Texto revisado</span>
+        <span className="label">Transcrição corrigida</span>
         <textarea
           className="field min-h-24 resize-y leading-6"
           value={text}
@@ -172,40 +157,6 @@ function SegmentCard({
           }}
         />
       </label>
-      {openIssue && (
-        <div className="mt-3 rounded-lg bg-[#fff4dc] p-3 text-sm">
-          <strong>{openIssue.issue_type}:</strong> {openIssue.description}
-          {openIssue.proposed_text && <span> · Sugestão: “{openIssue.proposed_text}”</span>}
-        </div>
-      )}
-      {needsHumanReview ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            className="btn btn-primary !min-h-9 !px-3 !py-1 text-sm"
-            onClick={() => void persist("confirm")}
-          >
-            Confirmar correção
-          </button>
-          <button
-            className="btn btn-secondary !min-h-9 !px-3 !py-1 text-sm"
-            onClick={() => void persist("keep_original", segment.raw_text)}
-          >
-            Manter original
-          </button>
-          {openIssue?.proposed_text && (
-            <button
-              className="btn btn-secondary !min-h-9 !px-3 !py-1 text-sm"
-              onClick={() => void persist("accept_suggestion", openIssue.proposed_text ?? text)}
-            >
-              Aceitar sugestão
-            </button>
-          )}
-        </div>
-      ) : (
-        <p className="mt-3 text-xs font-medium text-[#176b58]">
-          Nenhuma ação necessária. Edite apenas se quiser ajustar este trecho.
-        </p>
-      )}
     </article>
   );
 }
@@ -221,7 +172,7 @@ function VirtualTranscript({
   onSeek: (ms: number) => void;
   onUpdated: (item: TranscriptSegment) => void;
 }) {
-  const rowHeight = 338;
+  const rowHeight = 266;
   const [scrollTop, setScrollTop] = useState(0);
   const height = 680;
   const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 2);
@@ -255,6 +206,7 @@ function VirtualTranscript({
 function MaterialsPanel({ classId }: { classId: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [message, setMessage] = useState("");
+  const [packageBusy, setPackageBusy] = useState(false);
   const load = useCallback(async () => {
     const response = await fetch(`/api/classes/${classId}/materials`);
     if (response.ok) {
@@ -292,19 +244,24 @@ function MaterialsPanel({ classId }: { classId: string }) {
             subject_name: string;
             class_date: string;
             transcript_version: number;
-            notes: unknown;
+            transcript: Array<{
+              start_ms: number;
+              end_ms: number;
+              speaker_label: string | null;
+              text: string;
+            }>;
           };
           error?: { message: string };
         };
         if (!start.ok || !startBody.data)
           throw new Error(startBody.error?.message ?? "Não foi possível preparar o PDF.");
-        const { buildNotesPdf } = await import("@/lib/client-pdf");
-        const bytes = await buildNotesPdf({
+        const { buildTranscriptPdf } = await import("@/lib/client-pdf");
+        const bytes = await buildTranscriptPdf({
           classTitle: startBody.data.class_title,
           subjectName: startBody.data.subject_name,
           classDate: startBody.data.class_date,
           transcriptVersion: startBody.data.transcript_version,
-          notes: startBody.data.notes
+          transcript: startBody.data.transcript
         });
         const upload = await fetch(startBody.data.signed_url, {
           method: "PUT",
@@ -334,6 +291,34 @@ function MaterialsPanel({ classId }: { classId: string }) {
     }
     await load();
   }
+  async function generateAll() {
+    setPackageBusy(true);
+    setMessage("Gerando PDF da transcrição e materiais de estudo…");
+    try {
+      const requests = ["notes", "summary", "flashcards", "questions", "mindmap"].map(
+        async (material_type) => {
+          const response = await fetch(`/api/classes/${classId}/materials`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ material_type })
+          });
+          if (response.ok) return;
+          const body = (await response.json()) as { error?: { message?: string } };
+          throw new Error(body.error?.message ?? `Falha ao solicitar ${material_type}.`);
+        }
+      );
+      await Promise.all(requests);
+      await generate("pdf");
+      setMessage(
+        "Pacote solicitado. O PDF já pode ser baixado e os demais materiais aparecerão assim que ficarem prontos."
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Falha ao gerar o pacote completo.");
+    } finally {
+      setPackageBusy(false);
+      await load();
+    }
+  }
   function exportCsv(material: Material) {
     const cards = Array.isArray(material.structured_content.flashcards)
       ? (material.structured_content.flashcards as Flashcard[])
@@ -354,7 +339,7 @@ function MaterialsPanel({ classId }: { classId: string }) {
     flashcards: "Flashcards",
     questions: "Questões",
     mindmap: "Mapa mental",
-    pdf: "PDF da apostila"
+    pdf: "PDF da transcrição"
   };
   return (
     <section className="mt-10" aria-labelledby="materials-title">
@@ -364,7 +349,7 @@ function MaterialsPanel({ classId }: { classId: string }) {
             Materiais de estudo
           </h2>
           <p className="mt-1 text-sm text-[#61736f]">
-            Cada produto usa a versão validada e é gerado separadamente.
+            Um clique gera o PDF da transcrição corrigida e todos os materiais de estudo.
           </p>
         </div>
         {message && (
@@ -373,12 +358,14 @@ function MaterialsPanel({ classId }: { classId: string }) {
           </p>
         )}
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {["notes", "summary", "flashcards", "questions", "mindmap", "pdf"].map((type) => (
-          <button className="btn btn-secondary" key={type} onClick={() => void generate(type)}>
-            {labels[type]}
-          </button>
-        ))}
+      <div className="mt-4">
+        <button
+          className="btn btn-primary"
+          disabled={packageBusy}
+          onClick={() => void generateAll()}
+        >
+          {packageBusy ? "Gerando pacote…" : "Gerar pacote completo"}
+        </button>
       </div>
       <div className="mt-5 space-y-4">
         {materials.map((material) => (
@@ -456,7 +443,6 @@ export function ClassWorkspace({
   const [currentMs, setCurrentMs] = useState(0);
   const [durationMs, setDurationMs] = useState(initialClass.duration_ms ?? 0);
   const [search, setSearch] = useState("");
-  const [onlyIssues, setOnlyIssues] = useState(false);
 
   const loadSegments = useCallback(async () => {
     const response = await fetch(`/api/classes/${initialClass.id}/transcript`);
@@ -502,18 +488,13 @@ export function ClassWorkspace({
   const filtered = useMemo(
     () =>
       segments.filter((segment) => {
-        const matchesIssue =
-          !onlyIssues || segment.issues?.some((issue) => issue.status === "open");
         const haystack =
           `${segment.raw_text} ${segment.revised_text ?? ""} ${segment.speaker_label ?? ""}`.toLocaleLowerCase(
             "pt-BR"
           );
-        return matchesIssue && haystack.includes(search.toLocaleLowerCase("pt-BR"));
+        return haystack.includes(search.toLocaleLowerCase("pt-BR"));
       }),
-    [onlyIssues, search, segments]
-  );
-  const openIssues = segments.filter((segment) =>
-    segment.issues?.some((issue) => issue.status === "open")
+    [search, segments]
   );
   function seek(ms: number) {
     if (!audioRef.current) return;
@@ -524,13 +505,6 @@ export function ClassWorkspace({
   function updateSegment(updated: TranscriptSegment) {
     setSegments((items) => items.map((item) => (item.id === updated.id ? updated : item)));
   }
-  function nextIssue() {
-    const next = openIssues.find((item) => item.start_ms > currentMs) ?? openIssues[0];
-    if (next) {
-      seek(next.start_ms);
-      document.getElementById(`segment-${next.id}`)?.scrollIntoView({ block: "center" });
-    }
-  }
   async function retry() {
     await fetch(`/api/classes/${initialClass.id}/retry`, { method: "POST" });
   }
@@ -539,7 +513,7 @@ export function ClassWorkspace({
     <main className="mx-auto max-w-7xl px-5 py-7">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="font-bold text-[#176b58]">Transcrição e revisão</p>
+          <p className="font-bold text-[#176b58]">Transcrição corrigida</p>
           <h1 className="mt-1 text-3xl font-black sm:text-4xl">{initialClass.title}</h1>
           <p className="mt-2 text-[#61736f]">{initialClass.topic}</p>
         </div>
@@ -622,21 +596,10 @@ export function ClassWorkspace({
                 onChange={(event) => setSearch(event.target.value)}
               />
             </label>
-            <label className="btn btn-secondary cursor-pointer">
-              <input
-                type="checkbox"
-                checked={onlyIssues}
-                onChange={(event) => setOnlyIssues(event.target.checked)}
-              />{" "}
-              Somente pendências
-            </label>
-            <button className="btn btn-secondary" disabled={!openIssues.length} onClick={nextIssue}>
-              <SkipForward size={17} aria-hidden /> Próximo problema
-            </button>
           </div>
           <p className="mb-4 text-sm text-[#61736f]">
-            Trechos sem alerta são aprovados automaticamente. Confira apenas as pendências
-            destacadas.
+            A correção é automática. Use os timestamps para consultar o áudio original quando quiser
+            conferir o contexto.
           </p>
           {filtered.length ? (
             <VirtualTranscript
@@ -666,9 +629,6 @@ export function ClassWorkspace({
               {progress.chunks_completed} de {progress.chunks_total} blocos concluídos
             </p>
           )}
-          <p className="mt-3 text-sm">
-            <strong>{openIssues.length}</strong> pendência(s) aberta(s)
-          </p>
           {progress.error_message && (
             <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">
               <p>{progress.error_message}</p>

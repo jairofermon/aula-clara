@@ -55,9 +55,7 @@ describe("processador gratuito", () => {
     const reviewed = (index: number) => ({
       index,
       revised_text: "Texto revisado.",
-      needs_review: false,
-      confidence: 0.95,
-      issues: []
+      confidence: 0.95
     });
     const run = vi
       .fn()

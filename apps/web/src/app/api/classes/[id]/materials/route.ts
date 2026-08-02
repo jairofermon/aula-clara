@@ -30,50 +30,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   if (!(await ownsClass(context.supabase, id, context.user.id)))
     return apiError("Aula não encontrada.", 404, "not_found");
-  const [{ data: klass }, { count: openIssues }, { count: unreviewed }] = await Promise.all([
-    context.supabase
-      .from("classes")
-      .select("transcript_version")
-      .eq("id", id)
-      .eq("user_id", context.user.id)
-      .single(),
-    context.supabase
-      .from("transcript_issues")
-      .select("id", { count: "exact", head: true })
-      .eq("class_id", id)
-      .eq("status", "open"),
-    context.supabase
-      .from("transcript_segments")
-      .select("id", { count: "exact", head: true })
-      .eq("class_id", id)
-      .in("review_status", ["unreviewed", "needs_review"])
-  ]);
+  const { data: klass } = await context.supabase
+    .from("classes")
+    .select("transcript_version")
+    .eq("id", id)
+    .eq("user_id", context.user.id)
+    .single();
   if (!klass || klass.transcript_version < 1)
     return apiError("A transcrição ainda não está disponível.", 409, "transcript_missing");
-  if ((openIssues ?? 0) > 0 || (unreviewed ?? 0) > 0)
+  const { count: unreviewed } = await context.supabase
+    .from("transcript_segments")
+    .select("id", { count: "exact", head: true })
+    .eq("class_id", id)
+    .eq("transcript_version", klass.transcript_version)
+    .eq("review_status", "unreviewed");
+  if ((unreviewed ?? 0) > 0)
     return apiError(
-      "Confirme as pendências da transcrição antes de gerar materiais.",
+      "A correção automática da transcrição ainda está sendo concluída.",
       409,
-      "review_required"
+      "transcript_processing"
     );
   const type = parsed.data.material_type;
   const browserPdf = type === "pdf" && process.env.PROCESSING_DISPATCH_MODE === "cloudflare";
-  let notesMaterialId: string | null = null;
-  if (type === "pdf") {
-    const { data: notes } = await context.supabase
-      .from("materials")
-      .select("id")
-      .eq("class_id", id)
-      .eq("user_id", context.user.id)
-      .eq("material_type", "notes")
-      .eq("status", "completed")
-      .eq("source_transcript_version", klass.transcript_version)
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!notes) return apiError("Gere a apostila antes de exportar o PDF.", 409, "notes_required");
-    notesMaterialId = notes.id;
-  }
   const { data: latest } = await context.supabase
     .from("materials")
     .select("id,material_type,version,status")
@@ -124,8 +102,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         idempotency_key: `${jobType}:${id}:t${klass.transcript_version}:v${version}`,
         input_json: {
           material_id: material.id,
-          transcript_version: klass.transcript_version,
-          notes_material_id: notesMaterialId
+          transcript_version: klass.transcript_version
         }
       })
       .select("id")
@@ -165,8 +142,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       idempotency_key: `${jobType}:${id}:t${klass.transcript_version}:v${version}`,
       input_json: {
         material_id: material.id,
-        transcript_version: klass.transcript_version,
-        ...(notesMaterialId ? { notes_material_id: notesMaterialId } : {})
+        transcript_version: klass.transcript_version
       }
     })
     .select("id")

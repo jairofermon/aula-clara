@@ -37,7 +37,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .maybeSingle();
   if (!material) return apiError("Exportação não encontrada.", 404, "not_found");
 
-  const [{ data: klass }, { data: notes }] = await Promise.all([
+  const [{ data: klass }, { data: transcript }] = await Promise.all([
     context.supabase
       .from("classes")
       .select("id,subject_id,title,class_date,transcript_version")
@@ -45,19 +45,18 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       .eq("user_id", context.user.id)
       .single(),
     context.supabase
-      .from("materials")
-      .select("id,structured_content")
+      .from("transcript_segments")
+      .select("start_ms,end_ms,speaker_label,raw_text,revised_text,sequence_number")
       .eq("class_id", material.class_id)
-      .eq("user_id", context.user.id)
-      .eq("material_type", "notes")
-      .eq("status", "completed")
-      .eq("source_transcript_version", material.source_transcript_version)
-      .order("version", { ascending: false })
-      .limit(1)
-      .maybeSingle()
+      .eq("transcript_version", material.source_transcript_version)
+      .order("sequence_number")
   ]);
-  if (!klass || !notes)
-    return apiError("Gere a apostila validada antes do PDF.", 409, "notes_required");
+  if (!klass || !transcript?.length)
+    return apiError(
+      "A transcrição corrigida ainda não está disponível.",
+      409,
+      "transcript_missing"
+    );
   const { data: subject } = await context.supabase
     .from("subjects")
     .select("name")
@@ -68,7 +67,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   const storagePath =
     material.storage_path ??
-    `${context.user.id}/${material.class_id}/apostila-v${material.version}-${randomUUID()}.pdf`;
+    `${context.user.id}/${material.class_id}/transcricao-v${material.version}-${randomUUID()}.pdf`;
   const { error: updateError } = await context.supabase
     .from("materials")
     .update({ status: "generating", storage_path: storagePath, error_message: null })
@@ -102,7 +101,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       subject_name: subject.name,
       class_date: klass.class_date,
       transcript_version: material.source_transcript_version,
-      notes: notes.structured_content
+      transcript: transcript.map((segment) => ({
+        start_ms: segment.start_ms,
+        end_ms: segment.end_ms,
+        speaker_label: segment.speaker_label,
+        text: segment.revised_text ?? segment.raw_text
+      }))
     }
   });
 }
@@ -172,7 +176,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     .update({
       status: "completed",
       structured_content: {
-        kind: "study-notes-pdf",
+        kind: "corrected-transcript-pdf",
         source_transcript_version: material.source_transcript_version,
         renderer: "pdf-lib-browser"
       },

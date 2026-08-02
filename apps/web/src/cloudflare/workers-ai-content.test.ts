@@ -30,9 +30,7 @@ describe("conteúdo estruturado do Workers AI", () => {
           {
             index: 99,
             revised_text: "Texto revisado.",
-            needs_review: false,
-            confidence: 0.9,
-            issues: []
+            confidence: 0.9
           }
         ]
       }
