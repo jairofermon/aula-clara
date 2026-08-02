@@ -112,7 +112,7 @@ No Supabase, em **Authentication → URL Configuration**, defina o endereço pub
 
 ```text
 https://aula-clara.<sua-conta>.workers.dev/auth/callback
-https://aula-clara.<sua-conta>.workers.dev/update-password
+https://aula-clara.<sua-conta>.workers.dev/reset-password
 ```
 
 O roteiro completo, incluindo teste real e solução de erros, está em [docs/deployment.md](docs/deployment.md).

@@ -32,9 +32,6 @@
   "triggers": {
     "crons": ["*/5 * * * *"]
   },
-  "limits": {
-    "cpu_ms": 300000
-  },
   "secrets": {
     "required": ["SUPABASE_SERVICE_ROLE_KEY"]
   },

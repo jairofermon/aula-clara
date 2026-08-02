@@ -4,7 +4,7 @@ export default function Home() {
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col justify-center px-6 py-16">
       <span className="mb-5 w-fit rounded-full bg-[#e2efe9] px-4 py-2 text-sm font-bold text-[#176b58]">
-        Aula Clara · MVP local
+        Aula Clara · versão inicial
       </span>
       <h1 className="max-w-4xl text-5xl font-black tracking-tight sm:text-7xl">
         A gravação termina. O estudo começa claro.

@@ -126,7 +126,7 @@ No Supabase, abra **Authentication → URL Configuration**:
 - Site URL: URL exata do Worker;
 - Redirect URLs:
   - `https://aula-clara.<subdominio>.workers.dev/auth/callback`
-  - `https://aula-clara.<subdominio>.workers.dev/update-password`
+  - `https://aula-clara.<subdominio>.workers.dev/reset-password`
 
 Durante o primeiro smoke test, mantenha confirmação de e-mail conforme sua preferência. O fluxo de recuperação já está preparado; a entrega de e-mail em produção depende das cotas/configuração de Auth do Supabase.
 
