@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { ClassStatus } from "@aula-clara/shared";
 import { STATUS_LABELS, statusTone } from "@/lib/status";
+import { ClassDeleteButton } from "@/components/class-delete-button";
 
 export default async function SubjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -39,20 +40,19 @@ export default async function SubjectPage({ params }: { params: Promise<{ id: st
         {(classes ?? []).map((item) => {
           const status = item.status as ClassStatus;
           return (
-            <Link
-              href={`/classes/${item.id}/transcript`}
-              key={item.id}
-              className="card flex items-center justify-between gap-5 p-5"
-            >
-              <div>
+            <article key={item.id} className="card flex items-center justify-between gap-5 p-5">
+              <Link href={`/classes/${item.id}/transcript`} className="min-w-0 flex-1">
                 <h2 className="font-black">{item.title}</h2>
                 <p className="mt-1 text-sm text-[#61736f]">
                   {item.topic} ·{" "}
                   {new Date(`${item.class_date}T12:00:00`).toLocaleDateString("pt-BR")}
                 </p>
+              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`badge ${statusTone(status)}`}>{STATUS_LABELS[status]}</span>
+                <ClassDeleteButton classId={item.id} title={item.title} />
               </div>
-              <span className={`badge ${statusTone(status)}`}>{STATUS_LABELS[status]}</span>
-            </Link>
+            </article>
           );
         })}
         {!classes?.length && (

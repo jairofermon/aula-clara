@@ -41,6 +41,7 @@ export function SubjectManager({ initialSubjects }: { initialSubjects: Subject[]
       setMessage("Mova ou exclua as aulas antes de remover esta disciplina.");
       return;
     }
+    if (!window.confirm(`Excluir definitivamente a disciplina "${subject.name}"?`)) return;
     const response = await fetch(`/api/subjects/${subject.id}`, { method: "DELETE" });
     if (!response.ok) {
       const payload = (await response.json()) as { error?: { message: string } };

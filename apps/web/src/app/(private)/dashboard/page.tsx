@@ -4,6 +4,7 @@ import type { ClassStatus } from "@aula-clara/shared";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { ProgressBar } from "@/components/progress-bar";
+import { ClassDeleteButton } from "@/components/class-delete-button";
 import { STATUS_LABELS, statusTone } from "@/lib/status";
 
 export const metadata = { title: "Painel" };
@@ -121,6 +122,7 @@ export default async function DashboardPage() {
                     <Link className="btn btn-secondary" href={`/classes/${item.id}/diagnostics`}>
                       Diagnóstico
                     </Link>
+                    <ClassDeleteButton classId={item.id} title={item.title} />
                   </div>
                 </article>
               );
