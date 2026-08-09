@@ -287,7 +287,8 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           "review_segment_ids_mismatch",
           "invalid_provider_json",
           "invalid_provider_schema",
-          "groq_request_too_large"
+          "groq_request_too_large",
+          "groq_invalid_request"
         ].includes(error.code);
       if (!canSplit || segments.length === 1) {
         throw error;

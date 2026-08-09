@@ -81,7 +81,8 @@ async function runStructured<T>(
   schema: z.ZodType<T>,
   system: string,
   payload: unknown,
-  jsonObjectMode = false
+  jsonObjectMode = false,
+  maxTokens = 6000
 ): Promise<StructuredResult<T>> {
   let raw: unknown;
   let inputUnits: number | undefined;
@@ -108,7 +109,7 @@ async function runStructured<T>(
               json_schema: { name: "aula_clara_response", strict: true, schema: jsonSchema }
             }
           : { type: "json_object" },
-        6000
+        maxTokens
       );
       raw = result.response;
       inputUnits = result.inputUnits;
@@ -121,7 +122,7 @@ async function runStructured<T>(
           ? { type: "json_object" }
           : { type: "json_schema", json_schema: jsonSchema },
         temperature: 0.1,
-        max_tokens: 6000
+        max_tokens: maxTokens
       });
     }
   } catch (error) {
@@ -190,7 +191,21 @@ async function reviewSingleAsPlainText(
       });
     }
   } catch (error) {
-    throw classifyWorkersAiError(error);
+    const failure = classifyWorkersAiError(error);
+    if (failure.code === "groq_invalid_request") {
+      return {
+        data: {
+          segments: [
+            {
+              segment_id: segment.segment_id,
+              revised_text: segment.raw_text,
+              confidence: 0.5
+            }
+          ]
+        }
+      };
+    }
+    throw failure;
   }
 
   const envelope = workersAiJsonResponseSchema.safeParse(raw);
@@ -252,13 +267,17 @@ export async function reviewWithWorkersAi(
           end_ms: segment.end_ms
         })),
         context: context.slice(0, 8000)
-      }
+      },
+      false,
+      2500
     );
   } catch (error) {
-    const recoverableFormatError =
+    const recoverableReviewError =
       error instanceof JobProcessingError &&
-      ["invalid_provider_json", "invalid_provider_schema"].includes(error.code);
-    if (recoverableFormatError && segments.length === 1) {
+      ["invalid_provider_json", "invalid_provider_schema", "groq_invalid_request"].includes(
+        error.code
+      );
+    if (recoverableReviewError && segments.length === 1) {
       return reviewSingleAsPlainText(env, segments[0]!, context);
     }
     throw error;

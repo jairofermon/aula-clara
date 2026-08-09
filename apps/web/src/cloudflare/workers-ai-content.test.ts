@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateWithWorkersAi, reviewWithWorkersAi } from "./workers-ai-content";
 
 function cloudflareEnv(response: unknown): CloudflareEnv {
@@ -12,6 +12,19 @@ function cloudflareEnv(response: unknown): CloudflareEnv {
   } as unknown as CloudflareEnv;
 }
 
+function groqEnv(): CloudflareEnv {
+  return {
+    AI: { run: vi.fn(), aiGatewayLogId: null },
+    GROQ_API_KEY: "gsk_test_key_long_enough",
+    GROQ_REVIEW_MODEL: "openai/gpt-oss-20b",
+    GROQ_GENERATION_MODEL: "groq/compound",
+    CLOUDFLARE_REVIEW_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+    CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast"
+  } as unknown as CloudflareEnv;
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
 const transcript = [
   {
     segment_id: "00000000-0000-4000-8000-000000000001",
@@ -23,6 +36,78 @@ const transcript = [
 ] as const;
 
 describe("conteúdo estruturado do Workers AI", () => {
+  it("reduz uma recusa do Groq a revisão em texto simples", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("solicitação recusada", { status: 400 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "request-2",
+          choices: [{ message: { content: "Texto final corrigido." } }],
+          usage: { prompt_tokens: 10, completion_tokens: 4 }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      reviewWithWorkersAi(
+        groqEnv(),
+        [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            raw_text: "Texto final corrigido",
+            start_ms: 0,
+            end_ms: 1000
+          }
+        ],
+        "contexto"
+      )
+    ).resolves.toMatchObject({
+      data: {
+        segments: [
+          expect.objectContaining({
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            revised_text: "Texto final corrigido."
+          })
+        ]
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserva a transcrição quando o Groq recusa também o trecho isolado", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("solicitação recusada", { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      reviewWithWorkersAi(
+        groqEnv(),
+        [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            raw_text: "Texto original preservado",
+            start_ms: 0,
+            end_ms: 1000
+          }
+        ],
+        "contexto"
+      )
+    ).resolves.toMatchObject({
+      data: {
+        segments: [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            revised_text: "Texto original preservado",
+            confidence: 0.5
+          }
+        ]
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("recupera revisão com índice inválido usando texto simples", async () => {
     const env = cloudflareEnv(null);
     vi.mocked(env.AI.run)
