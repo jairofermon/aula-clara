@@ -12,6 +12,7 @@
   "include": [
     "next-env.d.ts",
     "worker-configuration.d.ts",
+    "cloudflare-secrets.d.ts",
     "cloudflare-entry.ts",
     "open-next.config.ts",
     "src/**/*.ts",

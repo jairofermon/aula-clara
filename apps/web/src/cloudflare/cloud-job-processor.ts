@@ -24,6 +24,7 @@ import {
   transcribeWithGroq
 } from "./groq-provider";
 import { geminiEnabled, transcribeWithGemini } from "./gemini-provider";
+import { assemblyAiEnabled, transcribeWithAssemblyAi } from "./assemblyai-provider";
 import {
   generateWithWorkersAi,
   markdownForMaterial,
@@ -199,7 +200,11 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       const startedAt = Date.now();
       let response: unknown;
       let failure: JobProcessingError | undefined;
-      if (groqEnabled(this.env)) {
+      const existingAssemblyTranscriptId =
+        typeof job.output_json.assemblyai_transcript_id === "string"
+          ? job.output_json.assemblyai_transcript_id
+          : undefined;
+      if (!existingAssemblyTranscriptId && groqEnabled(this.env)) {
         try {
           const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
           const result = await transcribeWithGroq(
@@ -214,6 +219,32 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           providerName = "groq";
         } catch (error) {
           failure = classifyAiError(error);
+        }
+      }
+      if (response === undefined && assemblyAiEnabled(this.env)) {
+        try {
+          const result = await transcribeWithAssemblyAi(
+            this.env,
+            audio,
+            input.language,
+            input.context,
+            {
+              existingTranscriptId: existingAssemblyTranscriptId,
+              onSubmitted: async (transcriptId) => {
+                await this.repository.saveProviderState(job.id, {
+                  ...job.output_json,
+                  assemblyai_transcript_id: transcriptId
+                });
+              }
+            }
+          );
+          response = result.data;
+          providerModel = result.model;
+          providerName = "assemblyai";
+        } catch (error) {
+          const assemblyFailure = classifyAiError(error);
+          if (existingAssemblyTranscriptId) throw assemblyFailure;
+          failure = failure ? soonerRetry(failure, assemblyFailure) : assemblyFailure;
         }
       }
       if (response === undefined) {

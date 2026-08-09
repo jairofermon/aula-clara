@@ -28,7 +28,8 @@ export const processingJobSchema = z
     status: z.enum(["pending", "running", "retry_wait", "completed", "failed", "cancelled"]),
     attempt_count: z.number().int().nonnegative(),
     max_attempts: z.number().int().positive(),
-    input_json: z.record(z.string(), z.unknown())
+    input_json: z.record(z.string(), z.unknown()),
+    output_json: z.record(z.string(), z.unknown()).default({})
   })
   .strip();
 
@@ -38,7 +39,9 @@ const whisperSegmentSchema = z
   .object({
     text: z.string().trim().min(1),
     start: z.number().nonnegative(),
-    end: z.number().positive()
+    end: z.number().positive(),
+    speaker: z.string().nullable().optional(),
+    confidence: z.number().min(0).max(1).nullable().optional()
   })
   .strip()
   .refine((segment) => segment.end > segment.start, {
@@ -70,8 +73,8 @@ export interface CloudTranscriptSegment {
   text: string;
   start_ms: number;
   end_ms: number;
-  speaker_label: null;
-  confidence: null;
+  speaker_label: string | null;
+  confidence: number | null;
 }
 
 const rpcErrorSchema = z.object({ error_code: z.string().min(1) }).strict();
@@ -255,8 +258,8 @@ export function normalizeWhisperResponse(
         text: segment.text,
         start_ms: Math.max(0, Math.round(segment.start * 1000)),
         end_ms: Math.min(durationMs, Math.round(segment.end * 1000)),
-        speaker_label: null,
-        confidence: null
+        speaker_label: segment.speaker ?? null,
+        confidence: segment.confidence ?? null
       }))
       .filter((segment) => segment.start_ms < durationMs && segment.end_ms > segment.start_ms);
   }

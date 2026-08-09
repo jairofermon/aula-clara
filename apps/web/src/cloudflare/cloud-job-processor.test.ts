@@ -11,7 +11,8 @@ const job: ProcessingJob = {
   status: "running",
   attempt_count: 2,
   max_attempts: 4,
-  input_json: { chunk_id: "00000000-0000-4000-8000-000000000004" }
+  input_json: { chunk_id: "00000000-0000-4000-8000-000000000004" },
+  output_json: {}
 };
 
 describe("processador gratuito", () => {

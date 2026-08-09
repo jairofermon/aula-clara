@@ -10,7 +10,8 @@ const job: ProcessingJob = {
   status: "running",
   attempt_count: 1,
   max_attempts: 4,
-  input_json: {}
+  input_json: {},
+  output_json: {}
 };
 
 function delivery(body: unknown) {

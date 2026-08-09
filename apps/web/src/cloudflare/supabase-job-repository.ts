@@ -191,6 +191,18 @@ export class SupabaseJobRepository implements QueueRepository {
     return response.arrayBuffer();
   }
 
+  async saveProviderState(jobId: string, output: Record<string, unknown>): Promise<void> {
+    const query = new URLSearchParams({
+      id: `eq.${jobId}`,
+      status: "eq.running",
+      locked_by: `eq.${this.env.WORKER_ID}`
+    });
+    await this.request(`/rest/v1/processing_jobs?${query}`, {
+      method: "PATCH",
+      body: JSON.stringify({ output_json: output })
+    });
+  }
+
   async claim(jobId: string): Promise<ProcessingJob | null> {
     const value = await this.rpc("claim_processing_job_by_id", {
       p_job_id: jobId,

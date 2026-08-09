@@ -114,6 +114,15 @@ pnpm --filter @aula-clara/web exec wrangler secret put GROQ_API_KEY
 
 A chave fica somente no Cloudflare. A fila respeita o limite gratuito de duas horas de áudio por janela horária e retoma automaticamente respostas `429`; o teto diário publicado pela Groq é de oito horas de áudio.
 
+Para habilitar o segundo transcritor do ranking, crie uma chave do AssemblyAI e grave-a sem colocá-la em arquivo:
+
+```bash
+cd apps/web
+pnpm exec wrangler secret put ASSEMBLYAI_API_KEY
+```
+
+O ID assíncrono retornado pelo AssemblyAI é persistido no job antes da espera. Uma interrupção retoma o mesmo pedido, sem reenviar o áudio ou criar outra transcrição.
+
 Reservas opcionais, sempre sem cobrança automática:
 
 ```powershell

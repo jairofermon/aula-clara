@@ -33,7 +33,7 @@
     "crons": ["*/5 * * * *"]
   },
   "secrets": {
-    "required": ["SUPABASE_SERVICE_ROLE_KEY"]
+    "required": ["SUPABASE_SERVICE_ROLE_KEY", "ASSEMBLYAI_API_KEY"]
   },
   "vars": {
     "SUPABASE_URL": "https://rctuenfnwlzmmpyjzhmq.supabase.co",
@@ -50,6 +50,7 @@
     "GROQ_SEGMENT_REVIEW_MODEL": "llama-3.1-8b-instant",
     "GROQ_REVIEW_MODEL": "openai/gpt-oss-20b",
     "GROQ_GENERATION_MODEL": "groq/compound",
+    "ASSEMBLYAI_TRANSCRIPTION_MODEL": "universal-3-pro",
     "GEMINI_GENERATION_MODEL": "gemini-2.5-flash",
     "GEMINI_DATA_PROCESSING_CONSENT": "accepted",
     "OPENROUTER_GENERATION_MODEL": "openrouter/free",

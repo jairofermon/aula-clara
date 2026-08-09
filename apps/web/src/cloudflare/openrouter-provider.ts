@@ -19,7 +19,7 @@ const responseSchema = z
 
 export function openRouterEnabled(env: CloudflareEnv): boolean {
   return (
-    env.OPENROUTER_DATA_PROCESSING_CONSENT === "accepted" &&
+    String(env.OPENROUTER_DATA_PROCESSING_CONSENT) === "accepted" &&
     typeof env.OPENROUTER_API_KEY === "string" &&
     env.OPENROUTER_API_KEY.length > 10
   );
