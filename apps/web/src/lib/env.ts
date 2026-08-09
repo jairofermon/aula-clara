@@ -16,12 +16,16 @@ export function getPublicEnv() {
 
 export function getServerEnv() {
   const publicEnv = getPublicEnv();
+  const legacyMaxUploadMb = process.env.MAX_UPLOAD_SIZE_MB;
   return {
     ...publicEnv,
     supabaseServerUrl: z
       .url()
       .parse(process.env.SUPABASE_INTERNAL_URL ?? publicEnv.NEXT_PUBLIC_SUPABASE_URL),
     signedUrlTtl: Number(process.env.SIGNED_URL_TTL_SECONDS ?? 300),
-    maxUploadBytes: Number(process.env.MAX_UPLOAD_SIZE_MB ?? 15) * 1024 * 1024
+    maxAudioUploadBytes:
+      Number(process.env.MAX_AUDIO_UPLOAD_SIZE_MB ?? legacyMaxUploadMb ?? 15) * 1024 * 1024,
+    maxMaterialUploadBytes:
+      Number(process.env.MAX_MATERIAL_UPLOAD_SIZE_MB ?? legacyMaxUploadMb ?? 50) * 1024 * 1024
   };
 }

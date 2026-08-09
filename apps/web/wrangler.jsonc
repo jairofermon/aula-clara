@@ -40,6 +40,8 @@
     "PROCESSING_DISPATCH_MODE": "cloudflare",
     "WORKER_ID": "aula-clara-cloudflare",
     "WORKER_LOCK_TTL_SECONDS": "900",
+    "MAX_AUDIO_UPLOAD_SIZE_MB": "15",
+    "MAX_MATERIAL_UPLOAD_SIZE_MB": "50",
     "MAX_TRANSCRIPTION_CHUNK_MB": "15",
     "CLOUDFLARE_TRANSCRIPTION_MODEL": "@cf/openai/whisper-large-v3-turbo",
     "CLOUDFLARE_REVIEW_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",

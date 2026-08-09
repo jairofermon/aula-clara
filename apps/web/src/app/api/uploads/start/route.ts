@@ -16,8 +16,18 @@ export async function POST(request: Request) {
   const input = parsed.data;
   if (!(await ownsClass(context.supabase, input.class_id, context.user.id)))
     return apiError("Aula não encontrada.", 404, "not_found");
-  if (input.size_bytes > getServerEnv().maxUploadBytes)
-    return apiError("O arquivo excede o limite configurado.", 413, "file_too_large");
+  const env = getServerEnv();
+  const maxUploadBytes =
+    input.file_type === "audio" ? env.maxAudioUploadBytes : env.maxMaterialUploadBytes;
+  if (input.size_bytes > maxUploadBytes) {
+    const limitMb = Math.floor(maxUploadBytes / 1024 / 1024);
+    const fileLabel = input.file_type === "audio" ? "áudio" : "material";
+    return apiError(
+      `O ${fileLabel} excede o limite de ${limitMb} MB da edição gratuita.`,
+      413,
+      "file_too_large"
+    );
+  }
   const extension = extname(input.original_name).toLowerCase();
   if (
     input.file_type === "audio" &&

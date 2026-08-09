@@ -90,11 +90,13 @@ function putWithProgress(
 export function ClassCreateForm({
   subjects,
   defaultSubject,
-  maxUploadBytes
+  maxAudioUploadBytes,
+  maxMaterialUploadBytes
 }: {
   subjects: Subject[];
   defaultSubject?: string;
-  maxUploadBytes: number;
+  maxAudioUploadBytes: number;
+  maxMaterialUploadBytes: number;
 }) {
   const router = useRouter();
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -166,9 +168,26 @@ export function ClassCreateForm({
       setBusy(false);
       return;
     }
-    if (audio.size > maxUploadBytes) {
+    if (audio.size > maxAudioUploadBytes) {
       setMessage(
-        `Na edição gratuita inicial, o áudio deve ter até ${Math.floor(maxUploadBytes / 1024 / 1024)} MB.`
+        `Na edição gratuita, o áudio deve ter até ${Math.floor(maxAudioUploadBytes / 1024 / 1024)} MB.`
+      );
+      setBusy(false);
+      return;
+    }
+    if (slides instanceof File && slides.size > maxMaterialUploadBytes) {
+      setMessage(
+        `O PDF dos slides deve ter até ${Math.floor(maxMaterialUploadBytes / 1024 / 1024)} MB.`
+      );
+      setBusy(false);
+      return;
+    }
+    const oversizedSupplement = supplements.find(
+      (item) => item instanceof File && item.size > maxMaterialUploadBytes
+    );
+    if (oversizedSupplement instanceof File) {
+      setMessage(
+        `O material “${oversizedSupplement.name}” deve ter até ${Math.floor(maxMaterialUploadBytes / 1024 / 1024)} MB.`
       );
       setBusy(false);
       return;
@@ -301,12 +320,15 @@ export function ClassCreateForm({
               accept=".m4a,.mp3,.wav,.mp4,.webm,audio/*,video/mp4,video/webm"
             />
             <span className="mt-2 block text-xs text-[#61736f]">
-              Limite gratuito inicial: {Math.floor(maxUploadBytes / 1024 / 1024)} MB.
+              Limite gratuito: {Math.floor(maxAudioUploadBytes / 1024 / 1024)} MB.
             </span>
           </label>
           <label>
             <span className="label">Slides em PDF</span>
             <input className="field" type="file" name="slides" accept="application/pdf,.pdf" />
+            <span className="mt-2 block text-xs text-[#61736f]">
+              Até {Math.floor(maxMaterialUploadBytes / 1024 / 1024)} MB.
+            </span>
           </label>
           <label>
             <span className="label">Materiais complementares</span>
@@ -317,6 +339,9 @@ export function ClassCreateForm({
               multiple
               accept="application/pdf,.pdf,text/plain"
             />
+            <span className="mt-2 block text-xs text-[#61736f]">
+              Até {Math.floor(maxMaterialUploadBytes / 1024 / 1024)} MB por arquivo.
+            </span>
           </label>
           {upload && (
             <div className="rounded-xl bg-[#edf5f1] p-4" role="status">

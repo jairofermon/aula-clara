@@ -99,7 +99,8 @@ NEXT_PUBLIC_APP_URL=https://aula-clara.<subdominio>.workers.dev
 NEXT_PUBLIC_SUPABASE_URL=https://rctuenfnwlzmmpyjzhmq.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<chave-publicável>
 PROCESSING_DISPATCH_MODE=cloudflare
-MAX_UPLOAD_SIZE_MB=15
+MAX_AUDIO_UPLOAD_SIZE_MB=15
+MAX_MATERIAL_UPLOAD_SIZE_MB=50
 SIGNED_URL_TTL_SECONDS=300
 ```
 

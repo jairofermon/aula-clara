@@ -16,7 +16,7 @@ export default async function NewClassPage({
     .eq("user_id", user.id)
     .order("name");
   const query = await searchParams;
-  const maxUploadBytes = getServerEnv().maxUploadBytes;
+  const { maxAudioUploadBytes, maxMaterialUploadBytes } = getServerEnv();
   return (
     <main className="mx-auto max-w-6xl px-5 py-9">
       <p className="font-bold text-[#176b58]">Nova aula</p>
@@ -29,7 +29,8 @@ export default async function NewClassPage({
         <ClassCreateForm
           subjects={data}
           defaultSubject={query.subject}
-          maxUploadBytes={maxUploadBytes}
+          maxAudioUploadBytes={maxAudioUploadBytes}
+          maxMaterialUploadBytes={maxMaterialUploadBytes}
         />
       ) : (
         <div className="card p-8">Crie uma disciplina antes de cadastrar uma aula.</div>
