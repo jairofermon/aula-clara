@@ -7,12 +7,12 @@ O caminho principal de publicação não exige servidor local nem OpenAI API pag
 ```text
 Navegador → Cloudflare Workers/OpenNext → Supabase Auth/PostgreSQL/Storage
                               ↓
-                   Cloudflare Queue + Workers AI
+             Cloudflare Queue + roteador de provedores
                               ↓
            transcrição, revisão e materiais persistidos
 ```
 
-A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui créditos da OpenAI API. Por isso, a implantação gratuita usa Workers AI; `OPENAI_API_KEY` permanece opcional e exclusiva do worker Python local.
+A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui créditos da OpenAI API. O caminho gratuito usa Groq e Workers AI, com Gemini e OpenRouter opcionais como reservas; `OPENAI_API_KEY` permanece opcional e exclusiva do worker Python local.
 
 ## O que já funciona
 
@@ -157,20 +157,22 @@ Nenhum teste comum chama API paga. Veja [docs/testing.md](docs/testing.md).
 
 ## Variáveis principais
 
-| Variável                        | Onde               | Uso                                             |
-| ------------------------------- | ------------------ | ----------------------------------------------- |
-| `NEXT_PUBLIC_APP_URL`           | build web          | URL pública e callbacks.                        |
-| `NEXT_PUBLIC_SUPABASE_URL`      | build web          | URL pública da API Supabase.                    |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | build/runtime web  | Chave publicável protegida por RLS.             |
-| `SUPABASE_URL`                  | segredo Cloudflare | API usada pelo consumidor.                      |
-| `SUPABASE_SERVICE_ROLE_KEY`     | segredo Cloudflare | Acesso exclusivo do consumidor às RPCs/Storage. |
-| `PROCESSING_DISPATCH_MODE`      | web                | `cloudflare` na publicação; `postgres` local.   |
-| `CLOUDFLARE_*_MODEL`            | Worker             | Modelos centralizados do Workers AI.            |
-| `MAX_AUDIO_UPLOAD_SIZE_MB`      | web/Worker         | Limite funcional de áudio gratuito: 15 MB.      |
-| `MAX_MATERIAL_UPLOAD_SIZE_MB`   | web/Worker         | Limite do Supabase Free: 50 MB por material.    |
-| `SIGNED_URL_TTL_SECONDS`        | web                | Validade dos downloads privados.                |
-| `OPENAI_API_KEY`                | Python opcional    | Nunca necessária no caminho gratuito.           |
-| `GROQ_API_KEY`                  | segredo Cloudflare | Capacidade gratuita principal de áudio e texto. |
+| Variável                        | Onde               | Uso                                               |
+| ------------------------------- | ------------------ | ------------------------------------------------- |
+| `NEXT_PUBLIC_APP_URL`           | build web          | URL pública e callbacks.                          |
+| `NEXT_PUBLIC_SUPABASE_URL`      | build web          | URL pública da API Supabase.                      |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | build/runtime web  | Chave publicável protegida por RLS.               |
+| `SUPABASE_URL`                  | segredo Cloudflare | API usada pelo consumidor.                        |
+| `SUPABASE_SERVICE_ROLE_KEY`     | segredo Cloudflare | Acesso exclusivo do consumidor às RPCs/Storage.   |
+| `PROCESSING_DISPATCH_MODE`      | web                | `cloudflare` na publicação; `postgres` local.     |
+| `CLOUDFLARE_*_MODEL`            | Worker             | Modelos centralizados do Workers AI.              |
+| `MAX_AUDIO_UPLOAD_SIZE_MB`      | web/Worker         | Limite funcional de áudio gratuito: 15 MB.        |
+| `MAX_MATERIAL_UPLOAD_SIZE_MB`   | web/Worker         | Limite do Supabase Free: 50 MB por material.      |
+| `SIGNED_URL_TTL_SECONDS`        | web                | Validade dos downloads privados.                  |
+| `OPENAI_API_KEY`                | Python opcional    | Nunca necessária no caminho gratuito.             |
+| `GROQ_API_KEY`                  | segredo Cloudflare | Capacidade gratuita principal de áudio e texto.   |
+| `GEMINI_API_KEY`                | segredo Cloudflare | Reserva opcional para áudio, revisão e materiais. |
+| `OPENROUTER_API_KEY`            | segredo Cloudflare | Reserva opcional para revisão e materiais.        |
 
 A lista completa e comentada está em [.env.example](.env.example).
 

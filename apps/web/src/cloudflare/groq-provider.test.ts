@@ -3,8 +3,8 @@ import { chatWithGroq, transcribeWithGroq } from "./groq-provider";
 
 const env = {
   GROQ_API_KEY: "gsk_test_key_long_enough",
-  GROQ_TRANSCRIPTION_MODEL: "whisper-large-v3-turbo"
-} as CloudflareEnv;
+  GROQ_TRANSCRIPTION_MODEL: "whisper-large-v3"
+} as unknown as CloudflareEnv;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -29,7 +29,7 @@ describe("provedor Groq gratuito", () => {
       "Biologia"
     );
 
-    expect(result).toMatchObject({ model: "whisper-large-v3-turbo", requestId: "req-1" });
+    expect(result).toMatchObject({ model: "whisper-large-v3", requestId: "req-1" });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect((init.headers as Record<string, string>).authorization).toBe(
       "Bearer gsk_test_key_long_enough"

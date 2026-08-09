@@ -23,8 +23,11 @@ prepare_audio
           ↓ (todos completos)
 assemble_transcript
           ↓
-review_transcript
-          └─ transcrição corrigida pronta
+review_transcript (trecho a trecho)
+          ↓
+review_transcript (leitura global)
+          ↓
+generate_summary → aula pronta para estudar
 
 generate_notes ─┐
 generate_summary ├─ independentes e versionados
@@ -60,7 +63,9 @@ Não há FFmpeg no Cloudflare nesta etapa. MP3/WAV/WebM/M4A compatível segue di
 `TranscriptionProvider.transcribe()` recebe path local, idioma, dica contextual limitada e opção de diarização. O resultado normalizado contém texto, início/fim em milissegundos, falante opcional e confiança opcional.
 
 - O provider OpenAI usa configuração centralizada.
-- O provider Cloudflare usa `@cf/openai/whisper-large-v3-turbo`, idioma `pt`, VAD e contexto limitado.
+- O roteador tenta Groq Whisper Large V3, Workers AI e Gemini habilitado, nessa ordem.
+- Limite, indisponibilidade ou credencial recusada em um fornecedor provoca troca imediata; somente o esgotamento de todas as rotas produz retry persistido.
+- Gemini só é usado quando a chave e `GEMINI_DATA_PROCESSING_CONSENT=accepted` estão presentes.
 - O fake gera segmentos determinísticos para testes.
 - Falantes ausentes permanecem nulos.
 - Respostas sem tempos válidos são rejeitadas.
@@ -89,7 +94,7 @@ Quando resta apenas um segmento e o modelo ainda não consegue produzir JSON vá
 
 Para aulas longas, cada entrega da Queue processa no máximo dez lotes. O worker então persiste uma continuação, libera o lock e reenfileira o mesmo `job_id` sem contabilizar a continuação como falha. O cron consulta jobs pendentes, retries vencidos e jobs `running`; a função transacional de claim só aceita estes últimos quando o lock expirou. Assim, ele continua sendo a rede de segurança caso a nova mensagem não seja entregue ou um worker seja interrompido.
 
-Todo trecho corrigido recebe `auto_reviewed` e não exige confirmação manual. Incerteza do modelo não interrompe o fluxo: ele preserva a formulação mais fiel e o timestamp permite a conferência opcional no áudio. O usuário ainda pode editar qualquer trecho; a edição é salva como `user_edited`.
+Todo trecho corrigido recebe `auto_reviewed` e não exige confirmação manual. Depois desse passe, uma chamada separada lê a transcrição completa em ordem, confirma a cobertura de todos os segmentos e persiste somente correções adicionais validadas. Incerteza do modelo não interrompe o fluxo: ele preserva a formulação mais fiel e o timestamp permite a conferência opcional no áudio. O usuário ainda pode editar qualquer trecho; a edição é salva como `user_edited`.
 
 `raw_text` nunca é alterado. `revised_text`, confiança e status são gravados na mesma transação. Ao concluir todos os lotes, a aula fica pronta para materiais automaticamente.
 
@@ -101,7 +106,19 @@ Para materiais, cada segmento usa:
 2. `revised_text` corrigido automaticamente;
 3. `raw_text` somente enquanto o lote ainda não foi corrigido.
 
-A geração é liberada assim que não existem segmentos `unreviewed` na versão corrente.
+A geração é liberada depois da revisão global. O resumo é automático e libera a aula para estudo; apostila, flashcards, questões e mapa mental entram em prioridade inferior para não atrasar a próxima aula.
+
+## Capacidade e failover
+
+Cada resultado limitado ou potencialmente cobrado é persistido antes de completar o job. Reentrega e troca de fornecedor consultam essa persistência e não repetem uma etapa concluída. Groq, Cloudflare, Gemini e OpenRouter possuem limites independentes; o sistema usa o primeiro resultado válido e registra modelo, duração e unidades. Não existe promessa de capacidade ilimitada em serviços gratuitos: quando todos estiverem simultaneamente sem cota, o job permanece seguro em `retry_wait`, com retomada automática na janela mais próxima.
+
+O ranking é reavaliado no início de cada chunk ou lote, permitindo que o provedor principal volte a ser usado assim que se recuperar:
+
+1. áudio: Groq Whisper Large V3, Workers AI Whisper e Gemini;
+2. revisão por trecho: Groq Llama Instant, Gemini Flash, Workers AI Llama e OpenRouter Free;
+3. revisão global e materiais: Groq Compound, Gemini Flash, Workers AI Llama e OpenRouter Free.
+
+Uma resposta só conta como disponibilidade quando também passa pelo schema e pelas regras semânticas da operação. HTTP 200 com JSON inválido não faz o pipeline avançar.
 
 ## PDF
 

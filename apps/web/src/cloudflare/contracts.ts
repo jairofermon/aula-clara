@@ -153,7 +153,31 @@ export const applyReviewResultSchema = z.union([
     .object({
       applied: z.number().int().positive(),
       remaining: z.number().int().nonnegative(),
-      needs_review: z.number().int().nonnegative()
+      needs_review: z.number().int().nonnegative(),
+      next_job_id: z.uuid().nullable().optional()
+    })
+    .strict()
+]);
+
+export const globalReviewInputSchema = z.union([
+  rpcErrorSchema,
+  z
+    .object({
+      segments: z.array(reviewInputSegmentSchema),
+      context: z.string(),
+      already_completed: z.boolean(),
+      summary_job_id: z.uuid().nullable()
+    })
+    .strict()
+]);
+
+export const applyGlobalReviewResultSchema = z.union([
+  rpcErrorSchema,
+  z
+    .object({
+      applied: z.number().int().nonnegative(),
+      checked: z.number().int().positive(),
+      summary_job_id: z.uuid().nullable()
     })
     .strict()
 ]);

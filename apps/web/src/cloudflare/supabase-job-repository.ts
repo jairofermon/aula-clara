@@ -106,6 +106,40 @@ export class SupabaseJobRepository implements QueueRepository {
     return result;
   }
 
+  async globalReviewInput(jobId: string): Promise<unknown> {
+    return this.rpc("get_cloud_global_review_input", {
+      p_job_id: jobId,
+      p_worker_id: this.env.WORKER_ID
+    });
+  }
+
+  async applyGlobalReview(
+    jobId: string,
+    patches: ReadonlyArray<Record<string, unknown>>,
+    checkedSegments: number,
+    modelName: string,
+    metrics: {
+      durationMs: number;
+      inputUnits?: number;
+      outputUnits?: number;
+      requestId?: string;
+    }
+  ): Promise<unknown> {
+    const result = await this.rpc("apply_cloud_global_review", {
+      p_job_id: jobId,
+      p_worker_id: this.env.WORKER_ID,
+      p_patches: patches,
+      p_checked_segments: checkedSegments,
+      p_model_name: modelName,
+      p_duration_ms: metrics.durationMs,
+      p_input_units: metrics.inputUnits ?? null,
+      p_output_units: metrics.outputUnits ?? null,
+      p_request_id: metrics.requestId ?? null
+    });
+    if (!modelName.startsWith("@cf/")) await this.correctUsageProvider(jobId, "groq", modelName);
+    return result;
+  }
+
   async materialInput(jobId: string): Promise<unknown> {
     return this.rpc("get_cloud_material_input", {
       p_job_id: jobId,
@@ -210,7 +244,7 @@ export class SupabaseJobRepository implements QueueRepository {
       select: "id",
       status: "in.(pending,retry_wait,running)",
       next_attempt_at: `lte.${new Date().toISOString()}`,
-      order: "next_attempt_at.asc,created_at.asc",
+      order: "priority.desc,next_attempt_at.asc,created_at.asc",
       limit: String(limit)
     });
     const response = await this.request(`/rest/v1/processing_jobs?${query}`, { method: "GET" });

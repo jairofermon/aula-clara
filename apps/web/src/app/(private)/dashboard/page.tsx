@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { ProgressBar } from "@/components/progress-bar";
 import { ClassDeleteButton } from "@/components/class-delete-button";
+import { ClassPriorityButton } from "@/components/class-priority-button";
 import { STATUS_LABELS, statusTone } from "@/lib/status";
 
 export const metadata = { title: "Painel" };
@@ -21,7 +22,7 @@ export default async function DashboardPage() {
     supabase
       .from("classes")
       .select(
-        "id,title,topic,status,progress,current_stage,error_message,created_at,subject:subjects(name)"
+        "id,title,topic,status,progress,current_stage,error_message,created_at,processing_priority,study_ready_at,target_ready_at,subject:subjects(name)"
       )
       .eq("user_id", user.id)
       .is("deleted_at", null)
@@ -122,6 +123,12 @@ export default async function DashboardPage() {
                     <Link className="btn btn-secondary" href={`/classes/${item.id}/diagnostics`}>
                       Diagnóstico
                     </Link>
+                    {!item.study_ready_at && (
+                      <ClassPriorityButton
+                        classId={item.id}
+                        active={item.processing_priority === 100}
+                      />
+                    )}
                     <ClassDeleteButton classId={item.id} title={item.title} />
                   </div>
                 </article>

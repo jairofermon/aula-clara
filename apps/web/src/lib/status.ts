@@ -8,7 +8,7 @@ export const STATUS_LABELS: Record<ClassStatus, string> = {
   reviewing: "Corrigindo transcrição",
   needs_user_review: "Finalizando correção",
   generating_materials: "Gerando materiais",
-  completed: "Concluída",
+  completed: "Pronta para estudar",
   failed: "Falhou"
 };
 

@@ -1,9 +1,11 @@
 import { Buffer } from "node:buffer";
 import { z } from "zod";
 import {
+  applyGlobalReviewResultSchema,
   applyReviewResultSchema,
   assembleTranscriptResultSchema,
   finishMaterialResultSchema,
+  globalReviewInputSchema,
   JobProcessingError,
   materialInputSchema,
   normalizeWhisperResponse,
@@ -17,13 +19,15 @@ import type { CloudJobProcessor } from "./queue-consumer";
 import type { SupabaseJobRepository } from "./supabase-job-repository";
 import {
   activeGenerationModel,
-  activeReviewModel,
+  activeSegmentReviewModel,
   groqEnabled,
   transcribeWithGroq
 } from "./groq-provider";
+import { geminiEnabled, transcribeWithGemini } from "./gemini-provider";
 import {
   generateWithWorkersAi,
   markdownForMaterial,
+  reviewWholeTranscriptWithWorkersAi,
   reviewWithWorkersAi,
   type GeneratableMaterial
 } from "./workers-ai-content";
@@ -72,6 +76,7 @@ type ReviewSegmentInput = {
 };
 
 function classifyAiError(error: unknown): JobProcessingError {
+  if (error instanceof JobProcessingError) return error;
   const details = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
   if (details.includes("3036") || details.includes("daily free allocation")) {
     return new JobProcessingError(
@@ -100,6 +105,12 @@ function classifyAiError(error: unknown): JobProcessingError {
     "O serviço de transcrição está temporariamente indisponível.",
     true
   );
+}
+
+function soonerRetry(first: JobProcessingError, second: JobProcessingError): JobProcessingError {
+  if (!first.transient) return second;
+  if (!second.transient) return first;
+  return (first.retryDelaySeconds ?? 3600) <= (second.retryDelaySeconds ?? 3600) ? first : second;
 }
 
 const sourceJobInputSchema = z.object({ source_file_id: z.uuid() }).passthrough();
@@ -187,8 +198,9 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
 
       const startedAt = Date.now();
       let response: unknown;
-      try {
-        if (groqEnabled(this.env)) {
+      let failure: JobProcessingError | undefined;
+      if (groqEnabled(this.env)) {
+        try {
           const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
           const result = await transcribeWithGroq(
             this.env,
@@ -200,7 +212,12 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           response = result.data;
           providerModel = result.model;
           providerName = "groq";
-        } else {
+        } catch (error) {
+          failure = classifyAiError(error);
+        }
+      }
+      if (response === undefined) {
+        try {
           response = await this.env.AI.run(this.env.CLOUDFLARE_TRANSCRIPTION_MODEL, {
             audio: Buffer.from(audio).toString("base64"),
             task: "transcribe",
@@ -210,11 +227,32 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
             condition_on_previous_text: true,
             no_speech_threshold: 0.6
           });
+          providerModel = this.env.CLOUDFLARE_TRANSCRIPTION_MODEL;
+          providerName = "cloudflare";
+        } catch (error) {
+          const cloudflareFailure = classifyAiError(error);
+          failure = failure ? soonerRetry(failure, cloudflareFailure) : cloudflareFailure;
         }
-      } catch (error) {
-        if (error instanceof JobProcessingError) throw error;
-        throw classifyAiError(error);
       }
+      if (response === undefined && geminiEnabled(this.env)) {
+        try {
+          const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
+          const result = await transcribeWithGemini(
+            this.env,
+            audio,
+            filename,
+            input.language,
+            input.context
+          );
+          response = result.data;
+          providerModel = result.model;
+          providerName = "gemini";
+        } catch (error) {
+          const geminiFailure = classifyAiError(error);
+          failure = failure ? soonerRetry(failure, geminiFailure) : geminiFailure;
+        }
+      }
+      if (response === undefined) throw failure ?? classifyAiError(new Error("no provider"));
       providerDurationMs = Date.now() - startedAt;
       segments = normalizeWhisperResponse(response, input.duration_ms);
       if (!segments.length) rpcFailure("no_speech");
@@ -261,15 +299,25 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     job: ProcessingJob,
     segments: ReviewSegmentInput[],
     context: string
-  ): Promise<{ applied: number; remaining: number; needs_review: number }> {
+  ): Promise<{
+    applied: number;
+    remaining: number;
+    needs_review: number;
+    next_job_id?: string | null;
+  }> {
     const startedAt = Date.now();
     try {
-      const result = await reviewWithWorkersAi(this.env, segments, context);
+      const result = await reviewWithWorkersAi(
+        this.env,
+        segments,
+        context,
+        activeSegmentReviewModel(this.env)
+      );
       const applied = applyReviewResultSchema.parse(
         await this.repository.applyReviewBatch(
           job.id,
           result.data.segments.map((segment) => ({ ...segment })),
-          activeReviewModel(this.env),
+          activeSegmentReviewModel(this.env),
           {
             durationMs: Date.now() - startedAt,
             inputUnits: result.inputUnits,
@@ -299,12 +347,14 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       return {
         applied: first.applied + second.applied,
         remaining: second.remaining,
-        needs_review: second.needs_review
+        needs_review: second.needs_review,
+        next_job_id: second.next_job_id
       };
     }
   }
 
   private async reviewTranscript(job: ProcessingJob) {
+    if (job.input_json.phase === "global") return this.reviewWholeTranscript(job);
     let reviewed = 0;
     let needsReview = 0;
     for (let batchNumber = 0; batchNumber < 10; batchNumber += 1) {
@@ -320,19 +370,57 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       reviewed += applied.applied;
       needsReview = applied.needs_review;
       if (applied.remaining === 0) {
-        return { output: { reviewed, needs_review: needsReview, resumed: false } };
-      }
-      if (groqEnabled(this.env)) {
         return {
-          output: { reviewed, needs_review: needsReview, resumed: false, continuing: true },
-          continueJob: true,
-          continueDelaySeconds: 65
+          output: { reviewed, needs_review: needsReview, resumed: false },
+          nextJobIds: applied.next_job_id ? [applied.next_job_id] : []
         };
       }
     }
     return {
       output: { reviewed, needs_review: needsReview, resumed: false, continuing: true },
       continueJob: true
+    };
+  }
+
+  private async reviewWholeTranscript(job: ProcessingJob) {
+    const input = globalReviewInputSchema.parse(await this.repository.globalReviewInput(job.id));
+    if ("error_code" in input) rpcFailure(input.error_code);
+    if (input.already_completed) {
+      return {
+        output: { resumed: true, transcript_validated: true, study_ready: false },
+        nextJobIds: input.summary_job_id ? [input.summary_job_id] : []
+      };
+    }
+    const startedAt = Date.now();
+    const result = await reviewWholeTranscriptWithWorkersAi(
+      this.env,
+      input.segments,
+      input.context
+    );
+    const model = activeGenerationModel(this.env);
+    const applied = applyGlobalReviewResultSchema.parse(
+      await this.repository.applyGlobalReview(
+        job.id,
+        result.data.patches.map((patch) => ({ ...patch })),
+        result.data.checked_segments,
+        model,
+        {
+          durationMs: Date.now() - startedAt,
+          inputUnits: result.inputUnits,
+          outputUnits: result.outputUnits,
+          requestId: result.requestId
+        }
+      )
+    );
+    if ("error_code" in applied) rpcFailure(applied.error_code);
+    return {
+      output: {
+        checked: applied.checked,
+        patches_applied: applied.applied,
+        transcript_validated: true,
+        study_ready: false
+      },
+      nextJobIds: applied.summary_job_id ? [applied.summary_job_id] : []
     };
   }
 

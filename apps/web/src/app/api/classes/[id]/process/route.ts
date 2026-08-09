@@ -19,6 +19,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .maybeSingle();
   if (!audio) return apiError("Envie e conclua o áudio antes de iniciar.", 409, "audio_missing");
   const idempotencyKey = `prepare_audio:${id}:${audio.id}`;
+  const startedAt = new Date();
+  const targetReadyAt = new Date(startedAt.getTime() + 30 * 60 * 1000);
+  const { data: klass } = await context.supabase
+    .from("classes")
+    .select("processing_priority")
+    .eq("id", id)
+    .eq("user_id", context.user.id)
+    .single();
   const { data: insertedJob, error } = await context.supabase
     .from("processing_jobs")
     .upsert(
@@ -28,6 +36,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
         job_type: "prepare_audio",
         status: "pending",
         stage: "queued",
+        priority: klass?.processing_priority ?? 50,
         idempotency_key: idempotencyKey,
         input_json: { source_file_id: audio.id }
       },
@@ -49,7 +58,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       status: "queued",
       progress: 0,
       current_stage: "Aguardando worker",
-      error_message: null
+      error_message: null,
+      processing_started_at: startedAt.toISOString(),
+      target_ready_at: targetReadyAt.toISOString(),
+      study_ready_at: null
     })
     .eq("id", id)
     .eq("user_id", context.user.id);

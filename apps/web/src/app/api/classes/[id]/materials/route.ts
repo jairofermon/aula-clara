@@ -32,7 +32,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return apiError("Aula não encontrada.", 404, "not_found");
   const { data: klass } = await context.supabase
     .from("classes")
-    .select("transcript_version")
+    .select("transcript_version,study_ready_at,processing_priority")
     .eq("id", id)
     .eq("user_id", context.user.id)
     .single();
@@ -96,6 +96,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         progress: 25,
         attempt_count: 1,
         max_attempts: 1,
+        priority: klass.processing_priority,
         locked_at: now,
         locked_by: `browser:${context.user.id}`,
         started_at: now,
@@ -115,11 +116,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .eq("user_id", context.user.id);
       return apiError("Não foi possível registrar a geração do PDF.", 500);
     }
-    await context.supabase
-      .from("classes")
-      .update({ status: "generating_materials", current_stage: "Preparando PDF no navegador" })
-      .eq("id", id)
-      .eq("user_id", context.user.id);
+    if (!klass.study_ready_at) {
+      await context.supabase
+        .from("classes")
+        .update({ status: "generating_materials", current_stage: "Preparando PDF no navegador" })
+        .eq("id", id)
+        .eq("user_id", context.user.id);
+    }
     return Response.json(
       {
         data: {
@@ -139,6 +142,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       job_type: jobType,
       status: "pending",
       stage: "queued",
+      priority: klass.study_ready_at
+        ? Math.max(klass.processing_priority - 20, 0)
+        : klass.processing_priority,
       idempotency_key: `${jobType}:${id}:t${klass.transcript_version}:v${version}`,
       input_json: {
         material_id: material.id,
@@ -149,11 +155,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .single();
   if (jobError || !job)
     return apiError("O material foi registrado, mas a fila falhou. Use repetir etapa.", 500);
-  await context.supabase
-    .from("classes")
-    .update({ status: "generating_materials", current_stage: `Gerando ${type}` })
-    .eq("id", id)
-    .eq("user_id", context.user.id);
+  if (!klass.study_ready_at) {
+    await context.supabase
+      .from("classes")
+      .update({ status: "generating_materials", current_stage: `Gerando ${type}` })
+      .eq("id", id)
+      .eq("user_id", context.user.id);
+  }
   try {
     await dispatchProcessingJob(job.id);
   } catch {

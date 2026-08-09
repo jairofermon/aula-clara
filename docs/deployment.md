@@ -114,6 +114,15 @@ pnpm --filter @aula-clara/web exec wrangler secret put GROQ_API_KEY
 
 A chave fica somente no Cloudflare. A fila respeita o limite gratuito de duas horas de áudio por janela horária e retoma automaticamente respostas `429`; o teto diário publicado pela Groq é de oito horas de áudio.
 
+Reservas opcionais, sempre sem cobrança automática:
+
+```powershell
+pnpm --filter @aula-clara/web exec wrangler secret put GEMINI_API_KEY
+pnpm --filter @aula-clara/web exec wrangler secret put OPENROUTER_API_KEY
+```
+
+Depois de revisar os termos de tratamento de dados, altere no `wrangler.jsonc` somente os consentimentos desejados para `accepted` e publique novamente. A presença da chave isoladamente nunca envia conteúdo a esses provedores.
+
 ## Passo 4 — validar e publicar
 
 ```powershell

@@ -10,7 +10,9 @@ export default async function TranscriptPage({ params }: { params: Promise<{ id:
   const supabase = await createClient();
   const { data: klass } = await supabase
     .from("classes")
-    .select("id,title,topic,status,progress,current_stage,error_message,transcript_version")
+    .select(
+      "id,title,topic,status,progress,current_stage,error_message,transcript_version,processing_priority,processing_started_at,target_ready_at,study_ready_at"
+    )
     .eq("id", id)
     .eq("user_id", user.id)
     .is("deleted_at", null)

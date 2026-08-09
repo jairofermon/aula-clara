@@ -14,6 +14,8 @@ import {
   chatWithGroq,
   groqEnabled
 } from "./groq-provider";
+import { chatWithGemini, geminiEnabled } from "./gemini-provider";
+import { chatWithOpenRouter, openRouterEnabled } from "./openrouter-provider";
 
 interface StructuredResult<T> {
   data: T;
@@ -65,6 +67,13 @@ const indexedReviewBatchSchema = z
   .object({ segments: z.array(indexedReviewedSegmentSchema).min(1) })
   .strict();
 
+const globalReviewSchema = z
+  .object({
+    checked_segments: z.number().int().positive(),
+    patches: z.array(indexedReviewedSegmentSchema)
+  })
+  .strict();
+
 function parseJsonValue(value: unknown): unknown {
   if (typeof value !== "string") return value;
   try {
@@ -93,7 +102,8 @@ async function runStructured<T>(
   system: string,
   payload: unknown,
   jsonObjectMode = false,
-  maxTokens = 6000
+  maxTokens = 6000,
+  cloudflareFallbackModel = env.CLOUDFLARE_GENERATION_MODEL
 ): Promise<StructuredResult<T>> {
   let raw: unknown;
   let inputUnits: number | undefined;
@@ -115,8 +125,9 @@ async function runStructured<T>(
     temperature: 0.1,
     max_tokens: maxTokens
   };
-  try {
-    if (groqEnabled(env)) {
+  const failures: JobProcessingError[] = [];
+  if (groqEnabled(env)) {
+    try {
       const strictSchema = model.startsWith("openai/gpt-oss");
       const result = await chatWithGroq(
         env,
@@ -134,25 +145,42 @@ async function runStructured<T>(
       inputUnits = result.inputUnits;
       outputUnits = result.outputUnits;
       requestId = result.requestId;
-    } else {
-      raw = await env.AI.run(model, cloudflareRequest);
+    } catch (error) {
+      failures.push(classifyWorkersAiError(error));
     }
-  } catch (error) {
-    const failure = classifyWorkersAiError(error);
-    const canUseCloudflareFallback =
-      groqEnabled(env) &&
-      ["groq_free_rate_limit", "groq_unavailable", "groq_request_too_large"].includes(failure.code);
-    if (!canUseCloudflareFallback) throw failure;
-    const fallbackModel =
-      model === env.GROQ_REVIEW_MODEL
-        ? env.CLOUDFLARE_REVIEW_MODEL
-        : env.CLOUDFLARE_GENERATION_MODEL;
+  }
+  if (raw === undefined && geminiEnabled(env)) {
     try {
-      raw = await env.AI.run(fallbackModel, cloudflareRequest);
-      requestId = env.AI.aiGatewayLogId ?? undefined;
-    } catch (fallbackError) {
-      throw earliestRetry(failure, classifyWorkersAiError(fallbackError));
+      const result = await chatWithGemini(env, messages, maxTokens);
+      raw = result.response;
+      inputUnits = result.inputUnits;
+      outputUnits = result.outputUnits;
+      requestId = result.requestId;
+    } catch (error) {
+      failures.push(classifyWorkersAiError(error));
     }
+  }
+  if (raw === undefined) {
+    try {
+      raw = await env.AI.run(cloudflareFallbackModel, cloudflareRequest);
+      requestId = env.AI.aiGatewayLogId ?? undefined;
+    } catch (error) {
+      failures.push(classifyWorkersAiError(error));
+    }
+  }
+  if (raw === undefined && openRouterEnabled(env)) {
+    try {
+      const result = await chatWithOpenRouter(env, messages, maxTokens);
+      raw = result.response;
+      inputUnits = result.inputUnits;
+      outputUnits = result.outputUnits;
+      requestId = result.requestId;
+    } catch (error) {
+      failures.push(classifyWorkersAiError(error));
+    }
+  }
+  if (raw === undefined) {
+    throw failures.slice(1).reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
   }
 
   const envelope = workersAiJsonResponseSchema.safeParse(raw);
@@ -182,7 +210,8 @@ async function reviewSingleAsPlainText(
     start_ms: number;
     end_ms: number;
   },
-  context: string
+  context: string,
+  model: string
 ): Promise<
   StructuredResult<{
     segments: Array<{ segment_id: string; revised_text: string; confidence: number }>;
@@ -204,7 +233,7 @@ async function reviewSingleAsPlainText(
   ];
   try {
     if (groqEnabled(env)) {
-      const result = await chatWithGroq(env, activeReviewModel(env), messages, undefined, 3000);
+      const result = await chatWithGroq(env, model, messages, undefined, 3000);
       raw = result.response;
       inputUnits = result.inputUnits;
       outputUnits = result.outputUnits;
@@ -291,13 +320,14 @@ export async function reviewWithWorkersAi(
     start_ms: number;
     end_ms: number;
   }>,
-  context: string
+  context: string,
+  model = activeReviewModel(env)
 ) {
   let result: Awaited<ReturnType<typeof runStructured<z.infer<typeof indexedReviewBatchSchema>>>>;
   try {
     result = await runStructured(
       env,
-      activeReviewModel(env),
+      model,
       indexedReviewBatchSchema,
       `${REVIEW_RULES} Leia os segmentos como partes consecutivas da mesma aula. Corrija erros de reconhecimento, pontuação, concordância e frases quebradas para produzir uma transcrição clara, coerente e fácil de entender, sem resumir, omitir exemplos ou inventar informações. Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
       {
@@ -310,7 +340,8 @@ export async function reviewWithWorkersAi(
         context: context.slice(0, 8000)
       },
       false,
-      2500
+      2500,
+      env.CLOUDFLARE_REVIEW_MODEL
     );
   } catch (error) {
     const recoverableReviewError =
@@ -319,7 +350,7 @@ export async function reviewWithWorkersAi(
         error.code
       );
     if (recoverableReviewError && segments.length === 1) {
-      return reviewSingleAsPlainText(env, segments[0]!, context);
+      return reviewSingleAsPlainText(env, segments[0]!, context, model);
     }
     throw error;
   }
@@ -329,7 +360,7 @@ export async function reviewWithWorkersAi(
     new Set(returned).size !== returned.length ||
     returned.some((index) => index < 0 || index >= segments.length)
   ) {
-    if (segments.length === 1) return reviewSingleAsPlainText(env, segments[0]!, context);
+    if (segments.length === 1) return reviewSingleAsPlainText(env, segments[0]!, context, model);
     throw new JobProcessingError(
       "review_segment_ids_mismatch",
       "A revisão não preservou os segmentos recebidos. Uma nova tentativa será feita.",
@@ -345,6 +376,64 @@ export async function reviewWithWorkersAi(
           ...segment,
           segment_id: segments[index]!.segment_id
         }))
+    }
+  };
+}
+
+export async function reviewWholeTranscriptWithWorkersAi(
+  env: CloudflareEnv,
+  segments: ReadonlyArray<{
+    segment_id: string;
+    raw_text: string;
+    start_ms: number;
+    end_ms: number;
+  }>,
+  context: string
+) {
+  const result = await runStructured(
+    env,
+    activeGenerationModel(env),
+    globalReviewSchema,
+    `${REVIEW_RULES} Esta é a segunda e última revisão. Analise a transcrição inteira como uma aula contínua. Identifique incoerências entre trechos, erros contextuais de reconhecimento, termos técnicos inconsistentes, repetições acidentais e frases ainda pouco claras. Não resuma, não omita conteúdo e não altere timestamps. Retorne checked_segments com a quantidade total recebida e, em patches, somente os índices que realmente precisam mudar.`,
+    {
+      context: context.slice(0, 12000),
+      transcript: segments.map((segment, index) => ({
+        index,
+        start_ms: segment.start_ms,
+        end_ms: segment.end_ms,
+        text: segment.raw_text
+      }))
+    },
+    true,
+    16000,
+    env.CLOUDFLARE_GENERATION_MODEL
+  );
+  if (result.data.checked_segments !== segments.length) {
+    throw new JobProcessingError(
+      "global_review_coverage_mismatch",
+      "A revisão final não confirmou a leitura integral. Uma nova tentativa será feita.",
+      true
+    );
+  }
+  const indexes = result.data.patches.map((patch) => patch.index);
+  if (
+    new Set(indexes).size !== indexes.length ||
+    indexes.some((index) => index < 0 || index >= segments.length)
+  ) {
+    throw new JobProcessingError(
+      "global_review_segment_mismatch",
+      "A revisão final citou um trecho inválido. Uma nova tentativa será feita.",
+      true
+    );
+  }
+  return {
+    ...result,
+    data: {
+      checked_segments: result.data.checked_segments,
+      patches: result.data.patches.map(({ index, ...patch }) => ({
+        ...patch,
+        segment_id: segments[index]!.segment_id
+      }))
     }
   };
 }
@@ -411,7 +500,9 @@ export async function generateWithWorkersAi(
     schema,
     "Gere material de estudo em português usando exclusivamente a transcrição validada. Preserve timestamps em milissegundos e IDs de origem. Não use HTML. Em questões, gere cinco alternativas distintas, exatamente uma correta e explique todas. No Mermaid, use somente mindmap com labels de texto simples.",
     { class: classContext, transcript },
-    materialType === "questions" || materialType === "mindmap"
+    materialType === "questions" || materialType === "mindmap",
+    6000,
+    env.CLOUDFLARE_GENERATION_MODEL
   );
   verifySourceReferences(
     result.data,

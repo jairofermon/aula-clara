@@ -31,6 +31,10 @@ interface ClassInfo {
   current_stage: string | null;
   error_message: string | null;
   duration_ms: number | null;
+  processing_priority?: number;
+  processing_started_at?: string | null;
+  target_ready_at?: string | null;
+  study_ready_at?: string | null;
 }
 interface Material {
   id: string;
@@ -49,6 +53,10 @@ interface Progress {
   error_message: string | null;
   chunks_completed: number;
   chunks_total: number;
+  processing_priority?: number;
+  processing_started_at?: string | null;
+  target_ready_at?: string | null;
+  study_ready_at?: string | null;
 }
 
 function SegmentCard({
@@ -521,6 +529,14 @@ export function ClassWorkspace({
           {STATUS_LABELS[progress.status]}
         </span>
       </div>
+      {progress.study_ready_at && (
+        <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
+          <p className="font-black">Pronta para estudar</p>
+          <p className="mt-1 text-sm">
+            A transcrição passou pelas duas revisões de IA e o resumo prioritário está disponível.
+          </p>
+        </div>
+      )}
       <section className="card sticky top-3 z-20 mt-7 p-4 sm:p-5" aria-label="Player de áudio">
         <audio
           ref={audioRef}

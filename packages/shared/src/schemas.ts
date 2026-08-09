@@ -51,11 +51,19 @@ export const segmentUpdateSchema = z
 
 export const materialRequestSchema = z.object({ material_type: z.enum(MATERIAL_TYPES) });
 
+export const processingPrioritySchema = z
+  .object({ priority: z.number().int().min(0).max(100) })
+  .strict();
+
 export const progressSchema = z.object({
   status: z.enum(CLASS_STATUSES),
   progress: z.number().int().min(0).max(100),
   current_stage: z.string().nullable(),
   error_message: z.string().nullable(),
+  processing_priority: z.number().int().min(0).max(100).optional(),
+  processing_started_at: z.string().nullable().optional(),
+  target_ready_at: z.string().nullable().optional(),
+  study_ready_at: z.string().nullable().optional(),
   chunks_completed: z.number().int().nonnegative(),
   chunks_total: z.number().int().nonnegative()
 });

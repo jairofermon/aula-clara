@@ -12,7 +12,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     [
       context.supabase
         .from("classes")
-        .select("status,progress,current_stage,error_message")
+        .select(
+          "status,progress,current_stage,error_message,processing_priority,processing_started_at,target_ready_at,study_ready_at"
+        )
         .eq("id", id)
         .eq("user_id", context.user.id)
         .single(),

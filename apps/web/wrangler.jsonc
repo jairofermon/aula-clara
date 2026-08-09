@@ -46,8 +46,13 @@
     "CLOUDFLARE_TRANSCRIPTION_MODEL": "@cf/openai/whisper-large-v3-turbo",
     "CLOUDFLARE_REVIEW_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
     "CLOUDFLARE_GENERATION_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
-    "GROQ_TRANSCRIPTION_MODEL": "whisper-large-v3-turbo",
+    "GROQ_TRANSCRIPTION_MODEL": "whisper-large-v3",
+    "GROQ_SEGMENT_REVIEW_MODEL": "llama-3.1-8b-instant",
     "GROQ_REVIEW_MODEL": "openai/gpt-oss-20b",
-    "GROQ_GENERATION_MODEL": "groq/compound"
+    "GROQ_GENERATION_MODEL": "groq/compound",
+    "GEMINI_GENERATION_MODEL": "gemini-2.5-flash",
+    "GEMINI_DATA_PROCESSING_CONSENT": "disabled",
+    "OPENROUTER_GENERATION_MODEL": "openrouter/free",
+    "OPENROUTER_DATA_PROCESSING_CONSENT": "disabled"
   }
 }

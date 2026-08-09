@@ -23,6 +23,7 @@ Gravações, slides e transcrições podem conter dados pessoais, educacionais o
 - No deploy gratuito, a Cloudflare Queue transporta apenas `job_id`; áudio e transcrição não entram na mensagem.
 - O consumidor Cloudflare acessa RPCs `SECURITY DEFINER` revogadas de `anon`/`authenticated` e liberadas somente para `service_role`.
 - Workers AI recebe somente o chunk necessário e contexto limitado; a resposta passa por Zod estrito antes de qualquer persistência.
+- Gemini e OpenRouter permanecem desativados mesmo com chave presente, até que o consentimento explícito correspondente seja configurado como `accepted`. O nível gratuito do Gemini pode usar conteúdo para melhorar produtos; o OpenRouter pode encaminhar a operadores distintos.
 - O PDF é montado localmente no navegador autenticado, sem enviar a apostila a um segundo serviço de renderização.
 
 ## Autorização nas APIs

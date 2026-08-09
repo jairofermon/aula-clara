@@ -108,7 +108,7 @@ describe("conteúdo estruturado do Workers AI", () => {
       }
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(env.AI.run).toHaveBeenCalledTimes(1);
+    expect(env.AI.run).toHaveBeenCalledTimes(2);
   });
 
   it("usa o provedor alternativo quando a cota temporária do Groq é atingida", async () => {

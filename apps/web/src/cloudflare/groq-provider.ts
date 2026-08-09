@@ -132,6 +132,10 @@ export function activeReviewModel(env: CloudflareEnv): string {
   return groqEnabled(env) ? env.GROQ_REVIEW_MODEL : env.CLOUDFLARE_REVIEW_MODEL;
 }
 
+export function activeSegmentReviewModel(env: CloudflareEnv): string {
+  return groqEnabled(env) ? env.GROQ_SEGMENT_REVIEW_MODEL : env.CLOUDFLARE_REVIEW_MODEL;
+}
+
 export function activeGenerationModel(env: CloudflareEnv): string {
   return groqEnabled(env) ? env.GROQ_GENERATION_MODEL : env.CLOUDFLARE_GENERATION_MODEL;
 }
