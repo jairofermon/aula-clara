@@ -11,7 +11,6 @@ export async function POST(request: Request) {
     .from("subjects")
     .select("id")
     .eq("id", parsed.data.subject_id)
-    .eq("user_id", context.user.id)
     .maybeSingle();
   if (!subject) return apiError("Disciplina não encontrada.", 404, "not_found");
   const payload = {

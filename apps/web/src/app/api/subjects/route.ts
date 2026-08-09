@@ -8,7 +8,6 @@ export async function GET() {
   const { data, error } = await context.supabase
     .from("subjects")
     .select("id,name,description,created_at")
-    .eq("user_id", context.user.id)
     .order("name");
   return error ? apiError("Não foi possível listar as disciplinas.", 500) : Response.json({ data });
 }

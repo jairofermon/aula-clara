@@ -1,5 +1,29 @@
+import { classSchema } from "@aula-clara/shared";
 import { getApiContext } from "@/lib/auth";
-import { apiError } from "@/lib/http";
+import { apiError, safeJson, validationError } from "@/lib/http";
+
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const context = await getApiContext();
+  if (!context) return apiError("Entre novamente.", 401, "unauthorized");
+  const parsed = classSchema
+    .omit({ subject_id: true })
+    .partial()
+    .safeParse(await safeJson(request));
+  if (!parsed.success) return validationError(parsed.error);
+  const { id } = await params;
+  const { data, error } = await context.supabase
+    .from("classes")
+    .update({
+      ...parsed.data,
+      teacher_name: parsed.data.teacher_name || null
+    })
+    .eq("id", id)
+    .select("id,title")
+    .maybeSingle();
+  return error || !data
+    ? apiError("Aula não encontrada.", 404, "not_found")
+    : Response.json({ data });
+}
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const context = await getApiContext();
@@ -7,23 +31,17 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   const { id } = await params;
   const { data: klass } = await context.supabase
     .from("classes")
-    .select("id,title")
+    .select("id,title,user_id")
     .eq("id", id)
-    .eq("user_id", context.user.id)
     .maybeSingle();
   if (!klass) return apiError("Aula não encontrada.", 404, "not_found");
 
   const [{ data: files }, { data: exports }] = await Promise.all([
-    context.supabase
-      .from("class_files")
-      .select("file_type,storage_path")
-      .eq("class_id", id)
-      .eq("user_id", context.user.id),
+    context.supabase.from("class_files").select("file_type,storage_path").eq("class_id", id),
     context.supabase
       .from("materials")
       .select("storage_path")
       .eq("class_id", id)
-      .eq("user_id", context.user.id)
       .not("storage_path", "is", null)
   ]);
 
@@ -55,11 +73,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     resource_id: id,
     metadata: { title: klass.title }
   });
-  const { error } = await context.supabase
-    .from("classes")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", context.user.id);
+  const { error } = await context.supabase.from("classes").delete().eq("id", id);
   return error
     ? apiError("Não foi possível excluir a aula.", 500)
     : new Response(null, { status: 204 });

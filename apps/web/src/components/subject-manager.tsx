@@ -9,6 +9,7 @@ interface Subject {
   name: string;
   description: string;
   class_count: number;
+  owner_name?: string;
 }
 
 export function SubjectManager({ initialSubjects }: { initialSubjects: Subject[] }) {
@@ -81,6 +82,9 @@ export function SubjectManager({ initialSubjects }: { initialSubjects: Subject[]
           <article className="card flex items-center justify-between gap-4 p-5" key={subject.id}>
             <a href={`/subjects/${subject.id}`}>
               <h3 className="font-black">{subject.name}</h3>
+              {subject.owner_name && (
+                <p className="text-xs text-[#61736f]">Incluída por: {subject.owner_name}</p>
+              )}
               <p className="mt-1 text-sm text-[#61736f]">
                 {subject.description || "Sem descrição"} · {subject.class_count} aula(s)
               </p>

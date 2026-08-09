@@ -12,7 +12,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     .from("subjects")
     .update(parsed.data)
     .eq("id", id)
-    .eq("user_id", context.user.id)
     .select("id,name,description")
     .maybeSingle();
   return error || !data
@@ -28,7 +27,6 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     .from("classes")
     .select("id", { count: "exact", head: true })
     .eq("subject_id", id)
-    .eq("user_id", context.user.id)
     .is("deleted_at", null);
   if ((count ?? 0) > 0)
     return apiError(
@@ -36,11 +34,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       409,
       "not_empty"
     );
-  const { error } = await context.supabase
-    .from("subjects")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", context.user.id);
+  const { error } = await context.supabase.from("subjects").delete().eq("id", id);
   return error
     ? apiError("Não foi possível excluir a disciplina.", 500)
     : new Response(null, { status: 204 });

@@ -10,20 +10,28 @@ export default async function SubjectPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const user = await requireUser();
   const supabase = await createClient();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
   const { data: subject } = await supabase
     .from("subjects")
-    .select("id,name,description")
+    .select("id,user_id,name,description")
     .eq("id", id)
-    .eq("user_id", user.id)
     .maybeSingle();
   if (!subject) notFound();
   const { data: classes } = await supabase
     .from("classes")
-    .select("id,title,topic,class_date,status,progress")
+    .select("id,user_id,title,topic,class_date,status,progress")
     .eq("subject_id", id)
-    .eq("user_id", user.id)
     .is("deleted_at", null)
     .order("class_date", { ascending: false });
+  const { data: owners } =
+    profile?.role === "admin"
+      ? await supabase.from("profiles").select("id,display_name")
+      : { data: [] };
+  const ownerNames = new Map((owners ?? []).map((owner) => [owner.id, owner.display_name]));
   return (
     <main className="mx-auto max-w-5xl px-5 py-9">
       <div className="flex items-end justify-between gap-4">
@@ -43,6 +51,11 @@ export default async function SubjectPage({ params }: { params: Promise<{ id: st
             <article key={item.id} className="card flex items-center justify-between gap-5 p-5">
               <Link href={`/classes/${item.id}/transcript`} className="min-w-0 flex-1">
                 <h2 className="font-black">{item.title}</h2>
+                {profile?.role === "admin" && (
+                  <p className="text-xs text-[#61736f]">
+                    Incluída por: {ownerNames.get(item.user_id) || "Usuário sem nome"}
+                  </p>
+                )}
                 <p className="mt-1 text-sm text-[#61736f]">
                   {item.topic} ·{" "}
                   {new Date(`${item.class_date}T12:00:00`).toLocaleDateString("pt-BR")}
@@ -50,6 +63,9 @@ export default async function SubjectPage({ params }: { params: Promise<{ id: st
               </Link>
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`badge ${statusTone(status)}`}>{STATUS_LABELS[status]}</span>
+                <Link className="btn btn-secondary" href={`/classes/${item.id}/edit`}>
+                  Editar
+                </Link>
                 <ClassDeleteButton classId={item.id} title={item.title} />
               </div>
             </article>

@@ -391,7 +391,7 @@ export async function reviewWithWorkersAi(
         context: context.slice(0, 8000)
       },
       false,
-      2500,
+      6000,
       env.CLOUDFLARE_REVIEW_MODEL
     );
   } catch (error) {
@@ -507,7 +507,8 @@ function rejectLowQuality(message: string): never {
 function assertMaterialQuality(
   materialType: GeneratableMaterial,
   content: unknown,
-  transcriptCharacters: number
+  transcriptCharacters: number,
+  maximumTimestampMs: number
 ): void {
   if (materialType === "summary") {
     const summary = summaryContentSchema.parse(content);
@@ -524,7 +525,10 @@ function assertMaterialQuality(
     const explained = details.filter((item) => item.trim().split(/\s+/u).length >= 6);
     if (
       (transcriptCharacters > 1_000 && summary.overview.length < 120) ||
-      (transcriptCharacters > 2_000 && explained.length < 5)
+      (transcriptCharacters > 2_000 && explained.length < 8) ||
+      (maximumTimestampMs > 600_000 &&
+        Math.max(0, ...summary.references.map((item) => item.timestamp_ms)) <
+          maximumTimestampMs * 0.8)
     )
       rejectLowQuality("O resumo ficou superficial. O próximo provedor será tentado.");
     return;
@@ -536,14 +540,20 @@ function assertMaterialQuality(
       0
     );
     const minimum = Math.min(8_000, Math.max(250, Math.floor(transcriptCharacters * 0.06)));
-    if (bodyCharacters < minimum)
+    if (
+      bodyCharacters < minimum ||
+      (maximumTimestampMs > 600_000 &&
+        Math.max(0, ...notes.sections.map((item) => item.timestamp_ms)) < maximumTimestampMs * 0.8)
+    )
       rejectLowQuality("A apostila ficou incompleta. O próximo provedor será tentado.");
     return;
   }
   if (materialType === "flashcards") {
     const cards = flashcardsContentSchema.parse(content).flashcards;
     if (
-      (transcriptCharacters > 2_000 && cards.length < 5) ||
+      (transcriptCharacters > 2_000 && cards.length < 10) ||
+      (maximumTimestampMs > 600_000 &&
+        Math.max(0, ...cards.map((item) => item.timestamp_ms)) < maximumTimestampMs * 0.8) ||
       cards.some((card) => card.front.length < 8 || card.back.length < 25)
     )
       rejectLowQuality("Os flashcards ficaram incompletos. O próximo provedor será tentado.");
@@ -552,7 +562,9 @@ function assertMaterialQuality(
   if (materialType === "questions") {
     const questions = questionsContentSchema.parse(content).questions;
     if (
-      (transcriptCharacters > 2_000 && questions.length < 3) ||
+      (transcriptCharacters > 2_000 && questions.length < 10) ||
+      (maximumTimestampMs > 600_000 &&
+        Math.max(0, ...questions.map((item) => item.timestamp_ms)) < maximumTimestampMs * 0.8) ||
       questions.some(
         (question) =>
           question.correct_explanation.length < 20 ||
@@ -565,7 +577,7 @@ function assertMaterialQuality(
   const mindmap = mindmapContentSchema.parse(content);
   const countNodes = (node: typeof mindmap.root): number =>
     1 + node.children.reduce((total, child) => total + countNodes(child), 0);
-  if (transcriptCharacters > 2_000 && countNodes(mindmap.root) < 6)
+  if (transcriptCharacters > 2_000 && countNodes(mindmap.root) < 12)
     rejectLowQuality("O mapa mental ficou superficial. O próximo provedor será tentado.");
 }
 
@@ -623,15 +635,15 @@ export async function generateWithWorkersAi(
   const maximumTimestampMs = Math.max(...transcript.map((segment) => segment.end_ms));
   const specificInstructions: Record<GeneratableMaterial, string> = {
     notes:
-      "Crie uma apostila completa e didática. Cada seção deve explicar o conteúdo em parágrafos claros, incluindo definições, mecanismos, classificações, relações, exemplos e observações do professor. Não entregue apenas tópicos.",
+      "Crie uma apostila completa e didática, cobrindo a aula do início ao fim. Cada seção deve explicar o conteúdo em parágrafos claros, incluindo definições, mecanismos, classificações, relações, exemplos e observações do professor. Não entregue apenas tópicos. Inclua também seções dos 20% finais do áudio.",
     summary:
-      "Crie um resumo substancial para revisão. Em cada lista, escreva afirmações completas no formato conceito seguido de explicação; nunca devolva apenas nomes de tópicos. Inclua os comentários, exemplos e ênfases principais do professor.",
+      "Crie um resumo substancial para revisão, cobrindo toda a duração da aula. Em cada lista, escreva afirmações completas no formato conceito seguido de explicação; nunca devolva apenas nomes de tópicos. Inclua comentários, exemplos e ênfases principais do professor, com referências distribuídas do início aos 20% finais do áudio.",
     flashcards:
-      "Crie cards autossuficientes: frente como pergunta objetiva e verso como resposta explicada e fiel à aula. Evite perguntas vagas ou respostas de uma palavra.",
+      "Crie no mínimo 10 cards e quantos mais forem necessários para cobrir o conteúdo importante, sem limite máximo artificial. Faça cards autossuficientes, aprofundados e variados, distribuídos por toda a aula, inclusive os 20% finais. Frente como pergunta objetiva e verso como resposta explicada e fiel à aula. Evite duplicações, perguntas vagas e respostas de uma palavra.",
     questions:
-      "Crie questões tecnicamente corretas e estritamente sustentadas pela transcrição. Use cinco alternativas plausíveis, exatamente uma correta, explique por que ela está correta e por que cada outra está incorreta. Faça uma verificação interna de coerência antes de responder.",
+      "Crie no mínimo 10 questões e quantas mais forem necessárias, sem limite máximo artificial, cobrindo toda a aula inclusive os 20% finais. Eleve a dificuldade: exija compreensão, aplicação, comparação e relações de causa e consequência. Use cinco alternativas igualmente plausíveis, exatamente uma correta, sem pistas óbvias por tamanho ou linguagem. Explique por que a correta está correta e por que cada outra está incorreta. Evite duplicações e faça uma verificação interna de coerência.",
     mindmap:
-      "Crie uma hierarquia clara e abrangente no campo root. O Mermaid é secundário; use somente mindmap, recuo com espaços e rótulos curtos sem caracteres de controle."
+      "Crie uma hierarquia profunda, clara e abrangente que represente todos os grandes assuntos, mecanismos, relações e exemplos da aula. O Mermaid é secundário; use somente mindmap, recuo com espaços e rótulos curtos sem caracteres de controle."
   };
   const result = await runStructured(
     env,
@@ -640,12 +652,18 @@ export async function generateWithWorkersAi(
     `Gere material de estudo em português usando exclusivamente a transcrição validada. Preserve timestamps em milissegundos e IDs de origem. Não use HTML. ${specificInstructions[materialType]}`,
     { class: classContext, transcript },
     materialType === "questions" || materialType === "mindmap",
-    materialType === "notes" || materialType === "summary" ? 9000 : 6000,
+    materialType === "questions"
+      ? 14_000
+      : materialType === "flashcards"
+        ? 10_000
+        : materialType === "notes" || materialType === "summary"
+          ? 9000
+          : 8000,
     env.CLOUDFLARE_GENERATION_MODEL,
     45_000,
     (candidate) => {
       verifySourceReferences(candidate, allowedSegmentIds, maximumTimestampMs);
-      assertMaterialQuality(materialType, candidate, transcriptCharacters);
+      assertMaterialQuality(materialType, candidate, transcriptCharacters, maximumTimestampMs);
     }
   );
   return result;

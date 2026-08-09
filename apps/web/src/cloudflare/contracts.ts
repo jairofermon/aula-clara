@@ -269,6 +269,80 @@ export function normalizeWhisperResponse(
     : [];
 }
 
+function normalizedSpeech(text: string): string {
+  return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLocaleLowerCase("pt-BR")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim();
+}
+
+export function mergeTranscriptSegments(
+  segments: ReadonlyArray<CloudTranscriptSegment>,
+  targetDurationMs = 20_000,
+  maximumCharacters = 1_000
+): CloudTranscriptSegment[] {
+  const merged: CloudTranscriptSegment[] = [];
+  for (const segment of segments) {
+    const previous = merged.at(-1);
+    const sameSpeaker = (previous?.speaker_label ?? null) === (segment.speaker_label ?? null);
+    const closeInTime = previous ? segment.start_ms - previous.end_ms <= 2_000 : false;
+    const withinTarget = previous ? segment.end_ms - previous.start_ms <= targetDurationMs : false;
+    const withinTextLimit = previous
+      ? previous.text.length + segment.text.length + 1 <= maximumCharacters
+      : false;
+    if (previous && sameSpeaker && closeInTime && withinTarget && withinTextLimit) {
+      previous.text = `${previous.text.trim()} ${segment.text.trim()}`.trim();
+      previous.end_ms = Math.max(previous.end_ms, segment.end_ms);
+      const confidences = [previous.confidence, segment.confidence].filter(
+        (value): value is number => value !== null
+      );
+      previous.confidence = confidences.length
+        ? Math.round(
+            (confidences.reduce((sum, value) => sum + value, 0) / confidences.length) * 10_000
+          ) / 10_000
+        : null;
+    } else {
+      merged.push({ ...segment, text: segment.text.trim() });
+    }
+  }
+  return merged;
+}
+
+export function assertTranscriptQuality(
+  segments: ReadonlyArray<CloudTranscriptSegment>,
+  durationMs: number
+): void {
+  if (!segments.length)
+    throw new JobProcessingError("no_speech", "Nenhuma fala foi identificada.", false);
+  const durationMinutes = Math.max(1, durationMs / 60_000);
+  const charactersPerMinute =
+    segments.reduce((total, segment) => total + segment.text.trim().length, 0) / durationMinutes;
+  const coverage = Math.max(...segments.map((segment) => segment.end_ms)) / durationMs;
+  let repeatedRun = 1;
+  let maximumRepeatedRun = 1;
+  let previous = "";
+  for (const segment of segments) {
+    const current = normalizedSpeech(segment.text);
+    repeatedRun = current.length >= 25 && current === previous ? repeatedRun + 1 : 1;
+    maximumRepeatedRun = Math.max(maximumRepeatedRun, repeatedRun);
+    previous = current;
+  }
+  if (
+    (durationMs >= 10 * 60_000 && charactersPerMinute < 100) ||
+    (durationMs >= 10 * 60_000 && coverage < 0.75) ||
+    maximumRepeatedRun >= 3
+  ) {
+    throw new JobProcessingError(
+      "transcription_quality_insufficient",
+      "A transcrição ficou incompleta ou repetitiva. O próximo provedor será tentado.",
+      true,
+      1
+    );
+  }
+}
+
 export class JobProcessingError extends Error {
   constructor(
     readonly code: string,

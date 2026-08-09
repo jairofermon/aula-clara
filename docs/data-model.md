@@ -13,7 +13,8 @@
 
 ### Identidade e organização
 
-- `profiles`: extensão 1:1 de `auth.users`.
+- `profiles`: extensão 1:1 de `auth.users`, com `role` (`admin`/`member`),
+  `approval_status`, responsável e data da aprovação.
 - `subjects`: disciplina pertencente a um usuário.
 - `classes`: unidade de processamento; contém estado e progresso agregados.
 - `audit_events`: ação, ator, recurso e metadados não sensíveis.

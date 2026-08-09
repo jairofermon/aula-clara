@@ -13,22 +13,35 @@ export const metadata = { title: "Painel" };
 export default async function DashboardPage() {
   const user = await requireUser();
   const supabase = await createClient();
-  const [{ data: subjects }, { data: classes }] = await Promise.all([
-    supabase
-      .from("subjects")
-      .select("id,name,description,created_at")
-      .eq("user_id", user.id)
-      .order("name"),
-    supabase
-      .from("classes")
-      .select(
-        "id,title,topic,status,progress,current_stage,error_message,created_at,processing_priority,study_ready_at,target_ready_at,subject:subjects(name)"
-      )
-      .eq("user_id", user.id)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false })
-      .limit(8)
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  const isAdmin = profile?.role === "admin";
+  let subjectsQuery = supabase
+    .from("subjects")
+    .select("id,name,description,created_at")
+    .order("name");
+  let classesQuery = supabase
+    .from("classes")
+    .select(
+      "id,user_id,subject_id,title,topic,status,progress,current_stage,error_message,created_at,processing_priority,study_ready_at,target_ready_at"
+    )
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (!isAdmin) {
+    subjectsQuery = subjectsQuery.eq("user_id", user.id);
+    classesQuery = classesQuery.eq("user_id", user.id);
+  }
+  const [{ data: subjects }, { data: classes }, { data: profiles }] = await Promise.all([
+    subjectsQuery,
+    classesQuery,
+    isAdmin ? supabase.from("profiles").select("id,display_name") : Promise.resolve({ data: [] })
   ]);
+  const ownerNames = new Map((profiles ?? []).map((item) => [item.id, item.display_name]));
+  const subjectNames = new Map((subjects ?? []).map((item) => [item.id, item.name]));
 
   return (
     <main className="mx-auto max-w-7xl px-5 py-9">
@@ -91,14 +104,18 @@ export default async function DashboardPage() {
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             {classes.map((item) => {
               const status = item.status as ClassStatus;
-              const subject = Array.isArray(item.subject) ? item.subject[0] : item.subject;
               return (
                 <article className="card p-5" key={item.id}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wide text-[#61736f]">
-                        {subject?.name ?? "Disciplina"}
+                        {subjectNames.get(item.subject_id) ?? "Disciplina"}
                       </p>
+                      {isAdmin && (
+                        <p className="mt-1 text-xs text-[#61736f]">
+                          Incluída por: {ownerNames.get(item.user_id) || "Usuário sem nome"}
+                        </p>
+                      )}
                       <h3 className="mt-1 text-xl font-black">{item.title}</h3>
                       <p className="mt-1 text-sm text-[#61736f]">{item.topic}</p>
                     </div>
@@ -122,6 +139,9 @@ export default async function DashboardPage() {
                     </Link>
                     <Link className="btn btn-secondary" href={`/classes/${item.id}/diagnostics`}>
                       Diagnóstico
+                    </Link>
+                    <Link className="btn btn-secondary" href={`/classes/${item.id}/edit`}>
+                      Editar
                     </Link>
                     {!item.study_ready_at && (
                       <ClassPriorityButton

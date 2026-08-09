@@ -4,6 +4,8 @@ import {
   applyGlobalReviewResultSchema,
   applyReviewResultSchema,
   assembleTranscriptResultSchema,
+  assertTranscriptQuality,
+  mergeTranscriptSegments,
   finishMaterialResultSchema,
   globalReviewInputSchema,
   JobProcessingError,
@@ -199,13 +201,18 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       if (audio.byteLength > this.maxAudioBytes) rpcFailure("audio_too_large");
 
       const startedAt = Date.now();
-      let response: unknown;
+      const accept = (response: unknown) => {
+        const normalized = normalizeWhisperResponse(response, input.duration_ms);
+        assertTranscriptQuality(normalized, input.duration_ms);
+        return mergeTranscriptSegments(normalized);
+      };
       let failure: JobProcessingError | undefined;
       const existingAssemblyTranscriptId =
         typeof job.output_json.assemblyai_transcript_id === "string"
           ? job.output_json.assemblyai_transcript_id
           : undefined;
-      if (!existingAssemblyTranscriptId && groqEnabled(this.env)) {
+      const skipPrimaryProvider = job.input_json.skip_primary_provider === true;
+      if (!existingAssemblyTranscriptId && !skipPrimaryProvider && groqEnabled(this.env)) {
         try {
           const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
           const result = await transcribeWithGroq(
@@ -215,14 +222,14 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
             input.language,
             input.context
           );
-          response = result.data;
+          segments = accept(result.data);
           providerModel = result.model;
           providerName = "groq";
         } catch (error) {
           failure = classifyAiError(error);
         }
       }
-      if (response === undefined && assemblyAiEnabled(this.env)) {
+      if (!segments.length && assemblyAiEnabled(this.env)) {
         try {
           const result = await transcribeWithAssemblyAi(
             this.env,
@@ -239,7 +246,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
               }
             }
           );
-          response = result.data;
+          segments = accept(result.data);
           providerModel = result.model;
           providerName = "assemblyai";
         } catch (error) {
@@ -252,11 +259,11 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           failure = failure ? soonerRetry(failure, assemblyFailure) : assemblyFailure;
         }
       }
-      if (response === undefined && deepgramEnabled(this.env)) {
+      if (!segments.length && deepgramEnabled(this.env)) {
         try {
           const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
           const result = await transcribeWithDeepgram(this.env, audio, filename, input.language);
-          response = result.data;
+          segments = accept(result.data);
           providerModel = result.model;
           providerName = "deepgram";
         } catch (error) {
@@ -264,9 +271,9 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           failure = failure ? soonerRetry(failure, deepgramFailure) : deepgramFailure;
         }
       }
-      if (response === undefined) {
+      if (!segments.length) {
         try {
-          response = await this.env.AI.run(this.env.CLOUDFLARE_TRANSCRIPTION_MODEL, {
+          const response = await this.env.AI.run(this.env.CLOUDFLARE_TRANSCRIPTION_MODEL, {
             audio: Buffer.from(audio).toString("base64"),
             task: "transcribe",
             language: input.language,
@@ -275,6 +282,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
             condition_on_previous_text: true,
             no_speech_threshold: 0.6
           });
+          segments = accept(response);
           providerModel = this.env.CLOUDFLARE_TRANSCRIPTION_MODEL;
           providerName = "cloudflare";
         } catch (error) {
@@ -282,7 +290,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           failure = failure ? soonerRetry(failure, cloudflareFailure) : cloudflareFailure;
         }
       }
-      if (response === undefined && geminiEnabled(this.env)) {
+      if (!segments.length && geminiEnabled(this.env)) {
         try {
           const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
           const result = await transcribeWithGemini(
@@ -292,7 +300,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
             input.language,
             input.context
           );
-          response = result.data;
+          segments = accept(result.data);
           providerModel = result.model;
           providerName = "gemini";
         } catch (error) {
@@ -300,10 +308,8 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           failure = failure ? soonerRetry(failure, geminiFailure) : geminiFailure;
         }
       }
-      if (response === undefined) throw failure ?? classifyAiError(new Error("no provider"));
+      if (!segments.length) throw failure ?? classifyAiError(new Error("no provider"));
       providerDurationMs = Date.now() - startedAt;
-      segments = normalizeWhisperResponse(response, input.duration_ms);
-      if (!segments.length) rpcFailure("no_speech");
     }
 
     const persisted = persistTranscriptionResultSchema.parse(
@@ -407,7 +413,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     let needsReview = 0;
     for (let batchNumber = 0; batchNumber < 10; batchNumber += 1) {
       const input = reviewInputSchema.parse(
-        await this.repository.reviewBatch(job.id, groqEnabled(this.env) ? 4 : 24)
+        await this.repository.reviewBatch(job.id, groqEnabled(this.env) ? 12 : 24)
       );
       if ("error_code" in input) rpcFailure(input.error_code);
       if (!input.segments.length) {

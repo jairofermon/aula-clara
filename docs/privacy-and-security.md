@@ -1,5 +1,18 @@
 # Privacidade e segurança
 
+## Perfis e aprovação
+
+Novos cadastros recebem o perfil `member` com acesso pendente. Até a aprovação por um
+administrador, as APIs e as políticas RLS bloqueiam disciplinas, aulas, arquivos,
+transcrições e materiais. Membros aprovados acessam somente os registros vinculados ao
+próprio `user_id`. Administradores aprovados podem visualizar e administrar todos os
+registros, e a interface identifica o usuário que incluiu cada aula.
+
+A exclusão de contas pela administração é restrita a membros, exige confirmação na
+interface e remove os arquivos privados conhecidos antes de excluir o usuário no Supabase
+Auth. Administradores não podem excluir a própria conta nem outro administrador por essa
+tela.
+
 ## Dados e responsabilidades
 
 Gravações, slides e transcrições podem conter dados pessoais, educacionais ou de saúde. A interface avisa que o usuário deve possuir autorização para gravar e processar a aula. A implantação real deve definir base legal, prazo de retenção, canal para titulares e termos de uso compatíveis com a jurisdição.

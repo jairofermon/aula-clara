@@ -1,7 +1,7 @@
-import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { ClassCreateForm } from "@/components/class-create-form";
 import { getServerEnv } from "@/lib/env";
+import { requireUser } from "@/lib/auth";
 
 export default async function NewClassPage({
   searchParams

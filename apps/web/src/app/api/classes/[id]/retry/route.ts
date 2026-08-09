@@ -7,7 +7,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const context = await getApiContext();
   if (!context) return apiError("Entre novamente.", 401, "unauthorized");
   const { id } = await params;
-  if (!(await ownsClass(context.supabase, id, context.user.id)))
+  if (!(await ownsClass(context.supabase, id)))
     return apiError("Aula não encontrada.", 404, "not_found");
   const { data: failed } = await context.supabase
     .from("processing_jobs")
@@ -28,15 +28,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       locked_by: null,
       error_code: null,
       error_message: null,
-      max_attempts: Math.max(failed.max_attempts, failed.attempt_count + 2)
+      max_attempts: Math.min(20, Math.max(failed.max_attempts, failed.attempt_count + 8))
     })
     .eq("id", failed.id);
   if (error) return apiError("Não foi possível reagendar a etapa.", 500);
   await context.supabase
     .from("classes")
     .update({ status: "queued", current_stage: "Etapa reagendada", error_message: null })
-    .eq("id", id)
-    .eq("user_id", context.user.id);
+    .eq("id", id);
   try {
     await dispatchProcessingJob(failed.id);
   } catch {

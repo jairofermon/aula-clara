@@ -6,7 +6,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const context = await getApiContext();
   if (!context) return apiError("Entre novamente.", 401, "unauthorized");
   const { id } = await params;
-  if (!(await ownsClass(context.supabase, id, context.user.id)))
+  if (!(await ownsClass(context.supabase, id)))
     return apiError("Aula não encontrada.", 404, "not_found");
   const [{ data: current }, { count: chunksTotal }, { count: chunksCompleted }] = await Promise.all(
     [

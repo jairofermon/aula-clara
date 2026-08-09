@@ -10,7 +10,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const parsed = processingPrioritySchema.safeParse(await safeJson(request));
   if (!parsed.success) return validationError(parsed.error);
   const { id } = await params;
-  if (!(await ownsClass(context.supabase, id, context.user.id)))
+  if (!(await ownsClass(context.supabase, id)))
     return apiError("Aula não encontrada.", 404, "not_found");
 
   if (parsed.data.priority === 100) {

@@ -114,7 +114,10 @@ describe("roteamento entre provedores gratuitos", () => {
       "O mecanismo relaciona as etapas apresentadas pelo professor durante a aula.",
       "A classificação organiza os casos conforme os critérios explicados na transcrição.",
       "A relação causal conecta o evento inicial às consequências discutidas em aula.",
-      "O ponto de prova destaca uma distinção que precisa ser lembrada pelo estudante."
+      "O ponto de prova destaca uma distinção que precisa ser lembrada pelo estudante.",
+      "O exemplo do professor demonstra como aplicar o conteúdo em uma situação concreta.",
+      "A comparação evidencia diferenças relevantes entre conceitos próximos apresentados.",
+      "A conclusão integra os principais argumentos desenvolvidos até o fim da aula."
     ];
     const accepted = {
       ...superficial,

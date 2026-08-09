@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const parsed = uploadStartSchema.safeParse(await safeJson(request));
   if (!parsed.success) return validationError(parsed.error);
   const input = parsed.data;
-  if (!(await ownsClass(context.supabase, input.class_id, context.user.id)))
+  if (!(await ownsClass(context.supabase, input.class_id)))
     return apiError("Aula não encontrada.", 404, "not_found");
   const env = getServerEnv();
   const maxUploadBytes =

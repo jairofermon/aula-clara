@@ -1,12 +1,10 @@
 import { notFound } from "next/navigation";
 import type { ClassStatus, TranscriptSegment } from "@aula-clara/shared";
-import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { ClassWorkspace } from "@/components/class-workspace";
 
 export default async function TranscriptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireUser();
   const supabase = await createClient();
   const { data: klass } = await supabase
     .from("classes")
@@ -14,7 +12,6 @@ export default async function TranscriptPage({ params }: { params: Promise<{ id:
       "id,title,topic,status,progress,current_stage,error_message,transcript_version,processing_priority,processing_started_at,target_ready_at,study_ready_at"
     )
     .eq("id", id)
-    .eq("user_id", user.id)
     .is("deleted_at", null)
     .maybeSingle();
   if (!klass) notFound();

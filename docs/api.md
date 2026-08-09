@@ -2,6 +2,16 @@
 
 Os Route Handlers ficam sob `/api`. Todos exigem cookie de sessão Supabase, exceto o callback de Auth. Payloads usam JSON; erros seguem `{ "error": { "code", "message", "details?" } }`. O servidor valida o proprietário e o banco reaplica RLS.
 
+## Administração de usuários
+
+- `GET /api/admin/users`: lista contas, perfis e aprovação (administrador).
+- `POST /api/admin/users`: cria administrador aprovado ou membro pendente.
+- `PATCH /api/admin/users`: aprova, rejeita ou altera o perfil de outra conta.
+- `DELETE /api/admin/users?userId=<uuid>`: exclui somente uma conta membro e seus dados.
+
+Todas as rotas validam a sessão e o perfil no servidor. A chave `service_role` é usada
+somente no servidor para operações do Supabase Auth.
+
 ## Disciplinas
 
 | Método   | Rota                | Corpo/resultado                     |

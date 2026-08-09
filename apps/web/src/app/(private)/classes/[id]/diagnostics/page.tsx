@@ -1,16 +1,13 @@
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DiagnosticsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireUser();
   const supabase = await createClient();
   const { data: klass } = await supabase
     .from("classes")
     .select("id,title,status,progress,current_stage,error_message,created_at,updated_at")
     .eq("id", id)
-    .eq("user_id", user.id)
     .maybeSingle();
   if (!klass) notFound();
   const [{ data: jobs }, { data: files }, { data: chunks }, { data: usage }] = await Promise.all([
