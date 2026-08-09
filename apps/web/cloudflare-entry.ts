@@ -13,9 +13,14 @@ export default {
     const repository = new SupabaseJobRepository(env);
     const processor = createCloudJobProcessor(env, repository);
     for (const message of batch.messages) {
-      const result = await consumeDelivery(message, repository, processor, async (jobId) => {
-        await env.PROCESSING_QUEUE.send({ job_id: jobId });
-      });
+      const result = await consumeDelivery(
+        message,
+        repository,
+        processor,
+        async (jobId, options) => {
+          await env.PROCESSING_QUEUE.send({ job_id: jobId }, options);
+        }
+      );
       console.log(
         JSON.stringify({
           event: "processing_queue.delivery",

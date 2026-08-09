@@ -65,6 +65,31 @@ describe("consumidor da fila Cloudflare", () => {
     expect(item.ack).toHaveBeenCalledOnce();
   });
 
+  it("respeita a cadência do provedor ao continuar um job", async () => {
+    const item = delivery({ job_id: job.id });
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+    await consumeDelivery(
+      item,
+      {
+        claim: vi.fn().mockResolvedValue(job),
+        complete: vi.fn(),
+        continue: vi.fn().mockResolvedValue(undefined),
+        fail: vi.fn()
+      },
+      {
+        process: vi.fn().mockResolvedValue({
+          output: { reviewed: 4 },
+          continueJob: true,
+          continueDelaySeconds: 65
+        })
+      },
+      enqueue
+    );
+
+    expect(enqueue).toHaveBeenCalledWith(job.id, { delaySeconds: 65 });
+    expect(item.ack).toHaveBeenCalledOnce();
+  });
+
   it("agenda backoff para falha temporária", async () => {
     const item = delivery({ job_id: job.id });
     const result = await consumeDelivery(

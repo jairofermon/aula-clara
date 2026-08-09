@@ -20,6 +20,7 @@ export interface CloudJobProcessor {
     output: Record<string, unknown>;
     nextJobIds?: string[];
     continueJob?: boolean;
+    continueDelaySeconds?: number;
   }>;
 }
 
@@ -50,7 +51,7 @@ export async function consumeDelivery(
   delivery: QueueDelivery,
   repository: QueueRepository,
   processor: CloudJobProcessor,
-  enqueue: (jobId: string) => Promise<void>
+  enqueue: (jobId: string, options?: { delaySeconds?: number }) => Promise<void>
 ): Promise<"completed" | "continued" | "retried" | "ignored"> {
   const message = processingQueueMessageSchema.safeParse(delivery.body);
   if (!message.success) {
@@ -66,7 +67,11 @@ export async function consumeDelivery(
     const result = await processor.process(job);
     if (result.continueJob) {
       await repository.continue(job.id, result.output);
-      await enqueue(job.id);
+      if (result.continueDelaySeconds) {
+        await enqueue(job.id, { delaySeconds: result.continueDelaySeconds });
+      } else {
+        await enqueue(job.id);
+      }
       delivery.ack();
       return "continued";
     }

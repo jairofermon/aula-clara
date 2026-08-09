@@ -286,7 +286,8 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
         [
           "review_segment_ids_mismatch",
           "invalid_provider_json",
-          "invalid_provider_schema"
+          "invalid_provider_schema",
+          "groq_request_too_large"
         ].includes(error.code);
       if (!canSplit || segments.length === 1) {
         throw error;
@@ -306,7 +307,9 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     let reviewed = 0;
     let needsReview = 0;
     for (let batchNumber = 0; batchNumber < 10; batchNumber += 1) {
-      const input = reviewInputSchema.parse(await this.repository.reviewBatch(job.id));
+      const input = reviewInputSchema.parse(
+        await this.repository.reviewBatch(job.id, groqEnabled(this.env) ? 4 : 24)
+      );
       if ("error_code" in input) rpcFailure(input.error_code);
       if (!input.segments.length) {
         return { output: { reviewed, needs_review: needsReview, resumed: reviewed === 0 } };
@@ -317,6 +320,13 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       needsReview = applied.needs_review;
       if (applied.remaining === 0) {
         return { output: { reviewed, needs_review: needsReview, resumed: false } };
+      }
+      if (groqEnabled(this.env)) {
+        return {
+          output: { reviewed, needs_review: needsReview, resumed: false, continuing: true },
+          continueJob: true,
+          continueDelaySeconds: 65
+        };
       }
     }
     return {

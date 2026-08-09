@@ -39,6 +39,14 @@ async function groqError(response: Response): Promise<never> {
       false
     );
   }
+  if (response.status === 413) {
+    throw new JobProcessingError(
+      "groq_request_too_large",
+      "O lote de texto excedeu o limite do provedor e será dividido automaticamente.",
+      true,
+      5
+    );
+  }
   if (response.status >= 500) {
     throw new JobProcessingError(
       "groq_unavailable",
