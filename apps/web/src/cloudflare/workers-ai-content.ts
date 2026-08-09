@@ -1,5 +1,6 @@
 import {
   flashcardsContentSchema,
+  formatTimestamp,
   mindmapContentSchema,
   notesContentSchema,
   questionsContentSchema,
@@ -19,6 +20,7 @@ import { chatWithOpenRouter, openRouterEnabled } from "./openrouter-provider";
 
 interface StructuredResult<T> {
   data: T;
+  modelName?: string;
   inputUnits?: number;
   outputUnits?: number;
   requestId?: string;
@@ -124,7 +126,12 @@ function parseJsonValue(value: unknown): unknown {
 function validateStructuredResponse<T>(
   raw: unknown,
   schema: z.ZodType<T>,
-  metrics: { inputUnits?: number; outputUnits?: number; requestId?: string } = {}
+  metrics: {
+    inputUnits?: number;
+    outputUnits?: number;
+    requestId?: string;
+    modelName?: string;
+  } = {}
 ): StructuredResult<T> {
   const envelope = workersAiJsonResponseSchema.safeParse(raw);
   const candidate = parseJsonValue(envelope.success ? envelope.data.response : raw);
@@ -139,6 +146,7 @@ function validateStructuredResponse<T>(
   }
   return {
     data: parsed.data,
+    modelName: metrics.modelName,
     inputUnits:
       metrics.inputUnits ?? (envelope.success ? envelope.data.usage?.prompt_tokens : undefined),
     outputUnits:
@@ -157,7 +165,8 @@ async function runStructured<T>(
   jsonObjectMode = false,
   maxTokens = 6000,
   cloudflareFallbackModel = env.CLOUDFLARE_GENERATION_MODEL,
-  providerTimeoutMs = 45_000
+  providerTimeoutMs = 45_000,
+  qualityCheck?: (data: T) => void
 ): Promise<StructuredResult<T>> {
   const jsonSchema = z.toJSONSchema(schema);
   const messages = [
@@ -176,6 +185,19 @@ async function runStructured<T>(
     max_tokens: maxTokens
   };
   const failures: JobProcessingError[] = [];
+  const accept = (
+    raw: unknown,
+    metrics: {
+      inputUnits?: number;
+      outputUnits?: number;
+      requestId?: string;
+      modelName?: string;
+    } = {}
+  ) => {
+    const result = validateStructuredResponse(raw, schema, metrics);
+    qualityCheck?.(result.data);
+    return result;
+  };
   if (groqEnabled(env)) {
     try {
       const strictSchema = model.startsWith("openai/gpt-oss");
@@ -194,7 +216,7 @@ async function runStructured<T>(
         ),
         providerTimeoutMs
       );
-      return validateStructuredResponse(result.response, schema, result);
+      return accept(result.response, { ...result, modelName: model });
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
@@ -205,7 +227,7 @@ async function runStructured<T>(
         chatWithGemini(env, messages, maxTokens),
         providerTimeoutMs
       );
-      return validateStructuredResponse(result.response, schema, result);
+      return accept(result.response, { ...result, modelName: env.GEMINI_GENERATION_MODEL });
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
@@ -215,8 +237,9 @@ async function runStructured<T>(
       Promise.resolve(env.AI.run(cloudflareFallbackModel, cloudflareRequest)),
       providerTimeoutMs
     );
-    return validateStructuredResponse(raw, schema, {
-      requestId: env.AI.aiGatewayLogId ?? undefined
+    return accept(raw, {
+      requestId: env.AI.aiGatewayLogId ?? undefined,
+      modelName: cloudflareFallbackModel
     });
   } catch (error) {
     failures.push(classifyWorkersAiError(error));
@@ -227,7 +250,7 @@ async function runStructured<T>(
         chatWithOpenRouter(env, messages, maxTokens),
         providerTimeoutMs
       );
-      return validateStructuredResponse(result.response, schema, result);
+      return accept(result.response, { ...result, modelName: env.OPENROUTER_GENERATION_MODEL });
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
@@ -477,6 +500,75 @@ const materialSchemas = {
 
 export type GeneratableMaterial = keyof typeof materialSchemas;
 
+function rejectLowQuality(message: string): never {
+  throw new JobProcessingError("material_quality_insufficient", message, true, 1);
+}
+
+function assertMaterialQuality(
+  materialType: GeneratableMaterial,
+  content: unknown,
+  transcriptCharacters: number
+): void {
+  if (materialType === "summary") {
+    const summary = summaryContentSchema.parse(content);
+    const details = [
+      ...summary.concepts,
+      ...summary.mechanisms,
+      ...summary.classifications,
+      ...summary.cause_and_effect,
+      ...summary.teacher_examples,
+      ...summary.emphasized_points,
+      ...summary.traps,
+      ...summary.exam_items
+    ];
+    const explained = details.filter((item) => item.trim().split(/\s+/u).length >= 6);
+    if (
+      (transcriptCharacters > 1_000 && summary.overview.length < 120) ||
+      (transcriptCharacters > 2_000 && explained.length < 5)
+    )
+      rejectLowQuality("O resumo ficou superficial. O próximo provedor será tentado.");
+    return;
+  }
+  if (materialType === "notes") {
+    const notes = notesContentSchema.parse(content);
+    const bodyCharacters = notes.sections.reduce(
+      (total, section) => total + section.body.length,
+      0
+    );
+    const minimum = Math.min(8_000, Math.max(250, Math.floor(transcriptCharacters * 0.06)));
+    if (bodyCharacters < minimum)
+      rejectLowQuality("A apostila ficou incompleta. O próximo provedor será tentado.");
+    return;
+  }
+  if (materialType === "flashcards") {
+    const cards = flashcardsContentSchema.parse(content).flashcards;
+    if (
+      (transcriptCharacters > 2_000 && cards.length < 5) ||
+      cards.some((card) => card.front.length < 8 || card.back.length < 25)
+    )
+      rejectLowQuality("Os flashcards ficaram incompletos. O próximo provedor será tentado.");
+    return;
+  }
+  if (materialType === "questions") {
+    const questions = questionsContentSchema.parse(content).questions;
+    if (
+      (transcriptCharacters > 2_000 && questions.length < 3) ||
+      questions.some(
+        (question) =>
+          question.correct_explanation.length < 20 ||
+          Object.keys(question.incorrect_explanations).length !== 4
+      )
+    )
+      rejectLowQuality("As questões não passaram pela validação. O próximo provedor será tentado.");
+    return;
+  }
+  const mindmap = mindmapContentSchema.parse(content);
+  const countNodes = (node: typeof mindmap.root): number =>
+    1 + node.children.reduce((total, child) => total + countNodes(child), 0);
+  if (transcriptCharacters > 2_000 && countNodes(mindmap.root) < 6)
+    rejectLowQuality("O mapa mental ficou superficial. O próximo provedor será tentado.");
+}
+
 function verifySourceReferences(
   value: unknown,
   allowedSegmentIds: ReadonlySet<string>,
@@ -523,20 +615,38 @@ export async function generateWithWorkersAi(
   classContext: Record<string, unknown>
 ) {
   const schema = materialSchemas[materialType] as z.ZodType<unknown>;
+  const transcriptCharacters = transcript.reduce(
+    (total, segment) => total + segment.text.length,
+    0
+  );
+  const allowedSegmentIds = new Set(transcript.map((segment) => segment.segment_id));
+  const maximumTimestampMs = Math.max(...transcript.map((segment) => segment.end_ms));
+  const specificInstructions: Record<GeneratableMaterial, string> = {
+    notes:
+      "Crie uma apostila completa e didática. Cada seção deve explicar o conteúdo em parágrafos claros, incluindo definições, mecanismos, classificações, relações, exemplos e observações do professor. Não entregue apenas tópicos.",
+    summary:
+      "Crie um resumo substancial para revisão. Em cada lista, escreva afirmações completas no formato conceito seguido de explicação; nunca devolva apenas nomes de tópicos. Inclua os comentários, exemplos e ênfases principais do professor.",
+    flashcards:
+      "Crie cards autossuficientes: frente como pergunta objetiva e verso como resposta explicada e fiel à aula. Evite perguntas vagas ou respostas de uma palavra.",
+    questions:
+      "Crie questões tecnicamente corretas e estritamente sustentadas pela transcrição. Use cinco alternativas plausíveis, exatamente uma correta, explique por que ela está correta e por que cada outra está incorreta. Faça uma verificação interna de coerência antes de responder.",
+    mindmap:
+      "Crie uma hierarquia clara e abrangente no campo root. O Mermaid é secundário; use somente mindmap, recuo com espaços e rótulos curtos sem caracteres de controle."
+  };
   const result = await runStructured(
     env,
     activeGenerationModel(env),
     schema,
-    "Gere material de estudo em português usando exclusivamente a transcrição validada. Preserve timestamps em milissegundos e IDs de origem. Não use HTML. Em questões, gere cinco alternativas distintas, exatamente uma correta e explique todas. No Mermaid, use somente mindmap com labels de texto simples.",
+    `Gere material de estudo em português usando exclusivamente a transcrição validada. Preserve timestamps em milissegundos e IDs de origem. Não use HTML. ${specificInstructions[materialType]}`,
     { class: classContext, transcript },
     materialType === "questions" || materialType === "mindmap",
-    6000,
-    env.CLOUDFLARE_GENERATION_MODEL
-  );
-  verifySourceReferences(
-    result.data,
-    new Set(transcript.map((segment) => segment.segment_id)),
-    Math.max(...transcript.map((segment) => segment.end_ms))
+    materialType === "notes" || materialType === "summary" ? 9000 : 6000,
+    env.CLOUDFLARE_GENERATION_MODEL,
+    45_000,
+    (candidate) => {
+      verifySourceReferences(candidate, allowedSegmentIds, maximumTimestampMs);
+      assertMaterialQuality(materialType, candidate, transcriptCharacters);
+    }
   );
   return result;
 }
@@ -559,7 +669,7 @@ export function markdownForMaterial(
         `## ${section.title}`,
         section.body,
         ``,
-        `Timestamp: ${section.timestamp_ms} ms`
+        `Timestamp: ${formatTimestamp(section.timestamp_ms)}`
       );
     }
     if (notes.emphasized_points.length)

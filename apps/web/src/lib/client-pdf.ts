@@ -14,6 +14,12 @@ export interface TranscriptPdfInput {
   }>;
 }
 
+export interface StudyMaterialPdfInput {
+  title: string;
+  classTitle: string;
+  text: string;
+}
+
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const MARGIN = 52;
@@ -180,6 +186,68 @@ export async function buildTranscriptPdf(input: TranscriptPdfInput): Promise<Uin
 
   document.setTitle(safePdfText(`${input.classTitle} - Transcrição corrigida`));
   document.setSubject(safePdfText(input.subjectName));
+  document.setProducer("Aula Clara - pdf-lib");
+  return document.save();
+}
+
+export async function buildStudyMaterialPdf(input: StudyMaterialPdfInput): Promise<Uint8Array> {
+  if (!input.text.trim()) throw new Error("O material está vazio.");
+  const document = await PDFDocument.create();
+  const regular = await document.embedFont(StandardFonts.Helvetica);
+  const bold = await document.embedFont(StandardFonts.HelveticaBold);
+  const green = rgb(0.09, 0.42, 0.35);
+  const ink = rgb(0.11, 0.16, 0.15);
+  const muted = rgb(0.38, 0.45, 0.44);
+  let page = document.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  let y = PAGE_HEIGHT - MARGIN;
+
+  const addPage = () => {
+    page = document.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    y = PAGE_HEIGHT - MARGIN;
+  };
+  const ensureSpace = (height: number) => {
+    if (y - height < 60) addPage();
+  };
+  const drawWrapped = (text: string, font: PDFFont, size: number, color = ink) => {
+    const lines = wrapText(text, font, size, CONTENT_WIDTH);
+    for (const line of lines) {
+      ensureSpace(size + 6);
+      if (line) page.drawText(line, { x: MARGIN, y, size, font, color });
+      y -= size + 6;
+    }
+  };
+
+  drawWrapped(input.title, bold, 24, green);
+  y -= 4;
+  drawWrapped(input.classTitle, regular, 10, muted);
+  y -= 16;
+  for (const rawLine of input.text.split(/\r?\n/u)) {
+    const line = rawLine.trimEnd();
+    if (!line) {
+      y -= 8;
+      continue;
+    }
+    const heading =
+      line.length < 90 &&
+      (line === line.toLocaleUpperCase("pt-BR") || /^(?:FLASHCARD|QUESTÃO)\s+\d+/u.test(line));
+    if (heading) {
+      y -= 5;
+      drawWrapped(line, bold, 13, green);
+      y -= 3;
+    } else {
+      drawWrapped(line, regular, 10.5);
+      y -= 3;
+    }
+  }
+
+  const pages = document.getPages();
+  pages.forEach((currentPage, index) => {
+    currentPage.drawText(
+      safePdfText(`Aula Clara · ${input.title} · página ${index + 1}/${pages.length}`),
+      { x: MARGIN, y: 28, size: 8, font: regular, color: muted }
+    );
+  });
+  document.setTitle(safePdfText(`${input.title} - ${input.classTitle}`));
   document.setProducer("Aula Clara - pdf-lib");
   return document.save();
 }

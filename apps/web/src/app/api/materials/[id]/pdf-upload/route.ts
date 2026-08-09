@@ -94,6 +94,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .createSignedUploadUrl(storagePath, { upsert: true });
   if (signedError || !signed) return apiError("Não foi possível autorizar o PDF privado.", 500);
 
+  const transcriptPayload = transcript.map((segment) => ({
+    start_ms: segment.start_ms,
+    end_ms: segment.end_ms,
+    speaker_label: segment.speaker_label,
+    text: segment.revised_text ?? segment.raw_text
+  }));
   return Response.json({
     data: {
       signed_url: signed.signedUrl,
@@ -101,12 +107,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       subject_name: subject.name,
       class_date: klass.class_date,
       transcript_version: material.source_transcript_version,
-      transcript: transcript.map((segment) => ({
-        start_ms: segment.start_ms,
-        end_ms: segment.end_ms,
-        speaker_label: segment.speaker_label,
-        text: segment.revised_text ?? segment.raw_text
-      }))
+      transcript: transcriptPayload
     }
   });
 }

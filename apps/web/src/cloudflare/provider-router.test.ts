@@ -95,4 +95,69 @@ describe("roteamento entre provedores gratuitos", () => {
     ).resolves.toMatchObject({ data: { overview: "Visão geral" } });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("rejeita resposta superficial e usa a próxima opção do ranking", async () => {
+    const superficial = {
+      overview: "Aula",
+      concepts: ["Conceito"],
+      mechanisms: [],
+      classifications: [],
+      cause_and_effect: [],
+      teacher_examples: [],
+      emphasized_points: [],
+      traps: [],
+      exam_items: [],
+      references: [{ timestamp_ms: 0, source_segment_ids: [segmentId] }]
+    };
+    const detailedItems = [
+      "O conceito central é explicado com contexto suficiente para orientar a revisão.",
+      "O mecanismo relaciona as etapas apresentadas pelo professor durante a aula.",
+      "A classificação organiza os casos conforme os critérios explicados na transcrição.",
+      "A relação causal conecta o evento inicial às consequências discutidas em aula.",
+      "O ponto de prova destaca uma distinção que precisa ser lembrada pelo estudante."
+    ];
+    const accepted = {
+      ...superficial,
+      overview:
+        "Esta visão geral apresenta de forma clara e detalhada os fundamentos discutidos pelo professor, preservando o contexto, as relações e os exemplos necessários para uma revisão confiável da aula.",
+      concepts: detailedItems,
+      exam_items: [detailedItems[4]]
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        id: "groq-superficial",
+        choices: [{ message: { content: JSON.stringify(superficial) } }]
+      })
+    );
+    const cloudflareRun = vi.fn().mockResolvedValue({ response: accepted });
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      AI: { run: cloudflareRun, aiGatewayLogId: null },
+      GROQ_API_KEY: "gsk_test_key_long_enough",
+      GROQ_GENERATION_MODEL: "groq/compound",
+      CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      GEMINI_DATA_PROCESSING_CONSENT: "disabled",
+      OPENROUTER_DATA_PROCESSING_CONSENT: "disabled"
+    } as unknown as CloudflareEnv;
+
+    const result = await generateWithWorkersAi(
+      env,
+      "summary",
+      [
+        {
+          segment_id: segmentId,
+          start_ms: 0,
+          end_ms: 60_000,
+          speaker_label: null,
+          text: "conteúdo detalhado da aula ".repeat(120)
+        }
+      ],
+      { title: "Aula" }
+    );
+
+    expect(result.data).toMatchObject({ overview: accepted.overview });
+    expect(result.modelName).toBe("@cf/meta/llama-3.1-8b-instruct-fast");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(cloudflareRun).toHaveBeenCalledTimes(1);
+  });
 });

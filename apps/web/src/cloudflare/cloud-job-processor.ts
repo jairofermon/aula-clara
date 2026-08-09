@@ -500,7 +500,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
         job.id,
         structuredContent,
         markdownForMaterial(materialType, structuredContent),
-        activeGenerationModel(this.env),
+        generated.modelName ?? activeGenerationModel(this.env),
         {
           durationMs: Date.now() - startedAt,
           inputUnits: generated.inputUnits,

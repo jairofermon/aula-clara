@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, Pause, Play, RotateCcw, Search } from "lucide-react";
 import {
@@ -11,16 +10,9 @@ import {
   type TranscriptSegment
 } from "@aula-clara/shared";
 import { ProgressBar } from "@/components/progress-bar";
+import { MaterialContent, materialToText } from "@/components/material-content";
 import { STATUS_LABELS, statusTone } from "@/lib/status";
 import { seekAudio } from "@/lib/player";
-
-const MindmapView = dynamic(
-  () => import("@/components/mindmap-view").then((module) => module.MindmapView),
-  {
-    ssr: false,
-    loading: () => <div className="skeleton h-64" aria-label="Carregando mapa mental" />
-  }
-);
 
 interface ClassInfo {
   id: string;
@@ -211,7 +203,7 @@ function VirtualTranscript({
   );
 }
 
-function MaterialsPanel({ classId }: { classId: string }) {
+function MaterialsPanel({ classId, classTitle }: { classId: string; classTitle: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [message, setMessage] = useState("");
   const [packageBusy, setPackageBusy] = useState(false);
@@ -230,6 +222,14 @@ function MaterialsPanel({ classId }: { classId: string }) {
     const timer = window.setInterval(() => void load(), 2_000);
     return () => window.clearInterval(timer);
   }, [load, materials]);
+  const visibleMaterials = useMemo(() => {
+    const seen = new Set<string>();
+    return materials.filter((material) => {
+      if (seen.has(material.material_type)) return false;
+      seen.add(material.material_type);
+      return true;
+    });
+  }, [materials]);
   async function generate(material_type: string) {
     setMessage("Registrando geração…");
     const response = await fetch(`/api/classes/${classId}/materials`, {
@@ -247,6 +247,7 @@ function MaterialsPanel({ classId }: { classId: string }) {
         const start = await fetch(`/api/materials/${body.data.id}/pdf-upload`, { method: "POST" });
         const startBody = (await start.json()) as {
           data?: {
+            completed?: boolean;
             signed_url: string;
             class_title: string;
             subject_name: string;
@@ -263,6 +264,11 @@ function MaterialsPanel({ classId }: { classId: string }) {
         };
         if (!start.ok || !startBody.data)
           throw new Error(startBody.error?.message ?? "Não foi possível preparar o PDF.");
+        if (startBody.data.completed) {
+          setMessage("PDF pronto para download.");
+          await load();
+          return;
+        }
         const { buildTranscriptPdf } = await import("@/lib/client-pdf");
         const bytes = await buildTranscriptPdf({
           classTitle: startBody.data.class_title,
@@ -337,7 +343,7 @@ function MaterialsPanel({ classId }: { classId: string }) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `aula-clara-flashcards-v${material.version}.csv`;
+    anchor.download = "aula-clara-flashcards.csv";
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -349,6 +355,33 @@ function MaterialsPanel({ classId }: { classId: string }) {
     mindmap: "Mapa mental",
     pdf: "PDF da transcrição"
   };
+  async function exportMaterialPdf(material: Material) {
+    try {
+      setMessage(`Gerando PDF de ${labels[material.material_type] ?? "material"}…`);
+      const { buildStudyMaterialPdf } = await import("@/lib/client-pdf");
+      const bytes = await buildStudyMaterialPdf({
+        title: labels[material.material_type] ?? material.material_type,
+        classTitle,
+        text: materialToText(material.material_type, material.structured_content)
+      });
+      const blob = new Blob([Uint8Array.from(bytes)], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const slug = (labels[material.material_type] ?? material.material_type)
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/gu, "")
+        .toLocaleLowerCase("pt-BR")
+        .replace(/[^a-z0-9]+/gu, "-")
+        .replace(/^-|-$/gu, "");
+      anchor.href = url;
+      anchor.download = `aula-clara-${slug}.pdf`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setMessage("PDF exportado.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não foi possível exportar o PDF.");
+    }
+  }
   return (
     <section className="mt-10" aria-labelledby="materials-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -376,12 +409,12 @@ function MaterialsPanel({ classId }: { classId: string }) {
         </button>
       </div>
       <div className="mt-5 space-y-4">
-        {materials.map((material) => (
+        {visibleMaterials.map((material) => (
           <article className="card p-5" key={material.id}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="font-black">
-                  {labels[material.material_type] ?? material.material_type} · v{material.version}
+                  {labels[material.material_type] ?? material.material_type}
                 </h3>
                 <span className="text-sm text-[#61736f]">
                   {material.status === "completed"
@@ -392,6 +425,22 @@ function MaterialsPanel({ classId }: { classId: string }) {
                 </span>
               </div>
               <div className="flex gap-2">
+                {material.status === "failed" && (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => void generate(material.material_type)}
+                  >
+                    Tentar novamente
+                  </button>
+                )}
+                {material.status === "completed" && material.material_type !== "pdf" && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => void exportMaterialPdf(material)}
+                  >
+                    <Download size={17} aria-hidden /> Exportar PDF
+                  </button>
+                )}
                 {material.material_type === "flashcards" && material.status === "completed" && (
                   <button className="btn btn-secondary" onClick={() => exportCsv(material)}>
                     <Download size={17} aria-hidden /> CSV Anki
@@ -404,24 +453,12 @@ function MaterialsPanel({ classId }: { classId: string }) {
                 )}
               </div>
             </div>
-            {material.markdown_content && (
-              <div className="mt-4 whitespace-pre-wrap rounded-lg bg-slate-50 p-4 text-sm leading-6">
-                {material.markdown_content}
-              </div>
+            {material.status === "completed" && material.material_type !== "pdf" && (
+              <MaterialContent
+                type={material.material_type}
+                content={material.structured_content}
+              />
             )}
-            {material.material_type === "mindmap" &&
-              typeof material.structured_content.mermaid === "string" && (
-                <div className="mt-4">
-                  <MindmapView code={material.structured_content.mermaid} />
-                </div>
-              )}
-            {material.status === "completed" &&
-              !material.markdown_content &&
-              material.material_type !== "mindmap" && (
-                <pre className="mt-4 max-h-96 overflow-auto rounded-lg bg-slate-50 p-4 text-xs">
-                  {JSON.stringify(material.structured_content, null, 2)}
-                </pre>
-              )}
             {material.error_message && (
               <p className="mt-3 text-sm text-red-700">{material.error_message}</p>
             )}
@@ -671,7 +708,7 @@ export function ClassWorkspace({
           </a>
         </aside>
       </section>
-      <MaterialsPanel classId={initialClass.id} />
+      <MaterialsPanel classId={initialClass.id} classTitle={initialClass.title} />
     </main>
   );
 }

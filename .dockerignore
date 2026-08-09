@@ -1,6 +1,12 @@
 .git
 .next
 **/.next
+.open-next
+**/.open-next
+.open-next-materials
+**/.open-next-materials
+.wrangler
+**/.wrangler
 node_modules
 **/node_modules
 .venv

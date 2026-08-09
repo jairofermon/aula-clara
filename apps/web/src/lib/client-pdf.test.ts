@@ -1,6 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
-import { buildTranscriptPdf } from "./client-pdf";
+import { buildStudyMaterialPdf, buildTranscriptPdf } from "./client-pdf";
 
 describe("PDF da transcrição no navegador", () => {
   it("gera um PDF válido com capa, conteúdo e timestamps", async () => {
@@ -22,5 +22,17 @@ describe("PDF da transcrição no navegador", () => {
     const document = await PDFDocument.load(bytes);
     expect(document.getPageCount()).toBeGreaterThanOrEqual(2);
     expect(document.getTitle()).toBe("Introdução à fisiologia - Transcrição corrigida");
+  });
+
+  it("exporta um material de estudo paginado", async () => {
+    const bytes = await buildStudyMaterialPdf({
+      title: "Flashcards",
+      classTitle: "Tanatologia Forense",
+      text: "FLASHCARD 1 [00:12]\nPergunta: O que é óbito?\nResposta: Cessação irreversível das funções vitais."
+    });
+    expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe("%PDF");
+    const document = await PDFDocument.load(bytes);
+    expect(document.getPageCount()).toBeGreaterThanOrEqual(1);
+    expect(document.getTitle()).toBe("Flashcards - Tanatologia Forense");
   });
 });
