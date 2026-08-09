@@ -258,7 +258,11 @@ describe("conteúdo estruturado do Workers AI", () => {
         ],
         "contexto"
       )
-    ).rejects.toMatchObject({ code: "invalid_provider_schema", transient: true });
+    ).rejects.toMatchObject({
+      code: "invalid_provider_schema",
+      transient: true,
+      retryDelaySeconds: 5
+    });
   });
 
   it("recupera revisão com índice inválido usando texto simples", async () => {

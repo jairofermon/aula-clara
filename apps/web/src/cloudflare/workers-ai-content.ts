@@ -90,7 +90,8 @@ function parseJsonValue(value: unknown): unknown {
     throw new JobProcessingError(
       "invalid_provider_json",
       "O modelo retornou JSON inválido. Uma nova tentativa será feita.",
-      true
+      true,
+      5
     );
   }
 }
@@ -107,7 +108,8 @@ function validateStructuredResponse<T>(
     throw new JobProcessingError(
       "invalid_provider_schema",
       "O modelo não respeitou o formato esperado. O próximo provedor será tentado.",
-      true
+      true,
+      5
     );
   }
   return {
@@ -246,7 +248,8 @@ async function reviewSingleAsPlainText(
       throw new JobProcessingError(
         "invalid_provider_schema",
         "A revisão não produziu texto válido. O próximo provedor será tentado.",
-        true
+        true,
+        5
       );
     }
     return {
