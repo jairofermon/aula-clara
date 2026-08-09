@@ -16,6 +16,12 @@ import {
 import type { CloudJobProcessor } from "./queue-consumer";
 import type { SupabaseJobRepository } from "./supabase-job-repository";
 import {
+  activeGenerationModel,
+  activeReviewModel,
+  groqEnabled,
+  transcribeWithGroq
+} from "./groq-provider";
+import {
   generateWithWorkersAi,
   markdownForMaterial,
   reviewWithWorkersAi,
@@ -170,6 +176,8 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
 
     let segments: ReturnType<typeof normalizeWhisperResponse> = [];
     let providerDurationMs = 0;
+    let providerModel: string = this.env.CLOUDFLARE_TRANSCRIPTION_MODEL;
+    let providerName = "cloudflare";
     if (!input.already_persisted) {
       if (input.size_bytes > this.maxAudioBytes) rpcFailure("audio_too_large");
       const audio = await this.repository.downloadAudio(input.storage_path);
@@ -180,16 +188,31 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       const startedAt = Date.now();
       let response: unknown;
       try {
-        response = await this.env.AI.run(this.env.CLOUDFLARE_TRANSCRIPTION_MODEL, {
-          audio: Buffer.from(audio).toString("base64"),
-          task: "transcribe",
-          language: input.language,
-          vad_filter: true,
-          initial_prompt: input.context.slice(0, 1200) || undefined,
-          condition_on_previous_text: true,
-          no_speech_threshold: 0.6
-        });
+        if (groqEnabled(this.env)) {
+          const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
+          const result = await transcribeWithGroq(
+            this.env,
+            audio,
+            filename,
+            input.language,
+            input.context
+          );
+          response = result.data;
+          providerModel = result.model;
+          providerName = "groq";
+        } else {
+          response = await this.env.AI.run(this.env.CLOUDFLARE_TRANSCRIPTION_MODEL, {
+            audio: Buffer.from(audio).toString("base64"),
+            task: "transcribe",
+            language: input.language,
+            vad_filter: true,
+            initial_prompt: input.context.slice(0, 1200) || undefined,
+            condition_on_previous_text: true,
+            no_speech_threshold: 0.6
+          });
+        }
       } catch (error) {
+        if (error instanceof JobProcessingError) throw error;
         throw classifyAiError(error);
       }
       providerDurationMs = Date.now() - startedAt;
@@ -201,8 +224,9 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       await this.repository.persistCloudTranscription(
         job.id,
         segments.map((segment) => ({ ...segment })),
-        this.env.CLOUDFLARE_TRANSCRIPTION_MODEL,
-        providerDurationMs
+        providerModel,
+        providerDurationMs,
+        providerName
       )
     );
     if ("error_code" in persisted) rpcFailure(persisted.error_code);
@@ -245,7 +269,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
         await this.repository.applyReviewBatch(
           job.id,
           result.data.segments.map((segment) => ({ ...segment })),
-          this.env.CLOUDFLARE_REVIEW_MODEL,
+          activeReviewModel(this.env),
           {
             durationMs: Date.now() - startedAt,
             inputUnits: result.inputUnits,
@@ -324,7 +348,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
         job.id,
         structuredContent,
         markdownForMaterial(materialType, structuredContent),
-        this.env.CLOUDFLARE_GENERATION_MODEL,
+        activeGenerationModel(this.env),
         {
           durationMs: Date.now() - startedAt,
           inputUnits: generated.inputUnits,

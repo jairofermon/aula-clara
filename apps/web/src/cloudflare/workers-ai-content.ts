@@ -8,6 +8,12 @@ import {
 import { REVIEW_RULES } from "@aula-clara/prompts";
 import { z } from "zod";
 import { JobProcessingError, workersAiJsonResponseSchema } from "./contracts";
+import {
+  activeGenerationModel,
+  activeReviewModel,
+  chatWithGroq,
+  groqEnabled
+} from "./groq-provider";
 
 interface StructuredResult<T> {
   data: T;
@@ -17,6 +23,7 @@ interface StructuredResult<T> {
 }
 
 function classifyWorkersAiError(error: unknown): JobProcessingError {
+  if (error instanceof JobProcessingError) return error;
   const details = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
   if (details.includes("3036") || details.includes("daily free allocation")) {
     const now = new Date();
@@ -77,24 +84,46 @@ async function runStructured<T>(
   jsonObjectMode = false
 ): Promise<StructuredResult<T>> {
   let raw: unknown;
+  let inputUnits: number | undefined;
+  let outputUnits: number | undefined;
+  let requestId: string | undefined;
+  const jsonSchema = z.toJSONSchema(schema);
+  const messages = [
+    {
+      role: "system" as const,
+      content: `${system} Responda somente com um objeto JSON válido que satisfaça rigorosamente este JSON Schema: ${JSON.stringify(jsonSchema)}`
+    },
+    { role: "user" as const, content: JSON.stringify(payload) }
+  ];
   try {
-    const jsonSchema = z.toJSONSchema(schema);
-    raw = await env.AI.run(model, {
-      messages: [
-        {
-          role: "system",
-          content: jsonObjectMode
-            ? `${system} Responda somente com um objeto JSON válido que satisfaça rigorosamente este JSON Schema: ${JSON.stringify(jsonSchema)}`
-            : system
-        },
-        { role: "user", content: JSON.stringify(payload) }
-      ],
-      response_format: jsonObjectMode
-        ? { type: "json_object" }
-        : { type: "json_schema", json_schema: jsonSchema },
-      temperature: 0.1,
-      max_tokens: 6000
-    });
+    if (groqEnabled(env)) {
+      const strictSchema = model.startsWith("openai/gpt-oss");
+      const result = await chatWithGroq(
+        env,
+        model,
+        messages,
+        strictSchema
+          ? {
+              type: "json_schema",
+              json_schema: { name: "aula_clara_response", strict: true, schema: jsonSchema }
+            }
+          : { type: "json_object" },
+        6000
+      );
+      raw = result.response;
+      inputUnits = result.inputUnits;
+      outputUnits = result.outputUnits;
+      requestId = result.requestId;
+    } else {
+      raw = await env.AI.run(model, {
+        messages,
+        response_format: jsonObjectMode
+          ? { type: "json_object" }
+          : { type: "json_schema", json_schema: jsonSchema },
+        temperature: 0.1,
+        max_tokens: 6000
+      });
+    }
   } catch (error) {
     throw classifyWorkersAiError(error);
   }
@@ -111,9 +140,10 @@ async function runStructured<T>(
   }
   return {
     data: parsed.data,
-    inputUnits: envelope.success ? envelope.data.usage?.prompt_tokens : undefined,
-    outputUnits: envelope.success ? envelope.data.usage?.completion_tokens : undefined,
-    requestId: env.AI.aiGatewayLogId ?? undefined
+    inputUnits: inputUnits ?? (envelope.success ? envelope.data.usage?.prompt_tokens : undefined),
+    outputUnits:
+      outputUnits ?? (envelope.success ? envelope.data.usage?.completion_tokens : undefined),
+    requestId: requestId ?? env.AI.aiGatewayLogId ?? undefined
   };
 }
 
@@ -132,21 +162,33 @@ async function reviewSingleAsPlainText(
   }>
 > {
   let raw: unknown;
+  let inputUnits: number | undefined;
+  let outputUnits: number | undefined;
+  let requestId: string | undefined;
+  const messages = [
+    {
+      role: "system" as const,
+      content: `${REVIEW_RULES} Retorne somente o texto final corrigido, sem JSON, título, explicação, aspas ou Markdown.`
+    },
+    {
+      role: "user" as const,
+      content: `Contexto: ${context.slice(0, 3000)}\n\nTranscrição: ${segment.raw_text}`
+    }
+  ];
   try {
-    raw = await env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
-      messages: [
-        {
-          role: "system",
-          content: `${REVIEW_RULES} Retorne somente o texto final corrigido, sem JSON, título, explicação, aspas ou Markdown.`
-        },
-        {
-          role: "user",
-          content: `Contexto: ${context.slice(0, 3000)}\n\nTranscrição: ${segment.raw_text}`
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 3000
-    });
+    if (groqEnabled(env)) {
+      const result = await chatWithGroq(env, activeReviewModel(env), messages, undefined, 3000);
+      raw = result.response;
+      inputUnits = result.inputUnits;
+      outputUnits = result.outputUnits;
+      requestId = result.requestId;
+    } else {
+      raw = await env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
+        messages,
+        temperature: 0.1,
+        max_tokens: 3000
+      });
+    }
   } catch (error) {
     throw classifyWorkersAiError(error);
   }
@@ -178,9 +220,10 @@ async function reviewSingleAsPlainText(
         }
       ]
     },
-    inputUnits: envelope.success ? envelope.data.usage?.prompt_tokens : undefined,
-    outputUnits: envelope.success ? envelope.data.usage?.completion_tokens : undefined,
-    requestId: env.AI.aiGatewayLogId ?? undefined
+    inputUnits: inputUnits ?? (envelope.success ? envelope.data.usage?.prompt_tokens : undefined),
+    outputUnits:
+      outputUnits ?? (envelope.success ? envelope.data.usage?.completion_tokens : undefined),
+    requestId: requestId ?? env.AI.aiGatewayLogId ?? undefined
   };
 }
 
@@ -198,7 +241,7 @@ export async function reviewWithWorkersAi(
   try {
     result = await runStructured(
       env,
-      env.CLOUDFLARE_REVIEW_MODEL,
+      activeReviewModel(env),
       indexedReviewBatchSchema,
       `${REVIEW_RULES} Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
       {
@@ -304,7 +347,7 @@ export async function generateWithWorkersAi(
   const schema = materialSchemas[materialType] as z.ZodType<unknown>;
   const result = await runStructured(
     env,
-    env.CLOUDFLARE_GENERATION_MODEL,
+    activeGenerationModel(env),
     schema,
     "Gere material de estudo em português usando exclusivamente a transcrição validada. Preserve timestamps em milissegundos e IDs de origem. Não use HTML. Em questões, gere cinco alternativas distintas, exatamente uma correta e explique todas. No Mermaid, use somente mindmap com labels de texto simples.",
     { class: classContext, transcript },

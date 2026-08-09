@@ -52,15 +52,18 @@ export class SupabaseJobRepository implements QueueRepository {
     jobId: string,
     segments: ReadonlyArray<Record<string, unknown>>,
     modelName: string,
-    durationMs: number
+    durationMs: number,
+    provider = "cloudflare"
   ): Promise<unknown> {
-    return this.rpc("persist_cloud_transcription", {
+    const result = await this.rpc("persist_cloud_transcription", {
       p_job_id: jobId,
       p_worker_id: this.env.WORKER_ID,
       p_segments: segments,
       p_model_name: modelName,
       p_duration_ms: durationMs
     });
+    if (provider !== "cloudflare") await this.correctUsageProvider(jobId, provider, modelName);
+    return result;
   }
 
   async assembleCloudTranscript(jobId: string): Promise<unknown> {
@@ -89,7 +92,7 @@ export class SupabaseJobRepository implements QueueRepository {
       requestId?: string;
     }
   ): Promise<unknown> {
-    return this.rpc("apply_cloud_review_batch", {
+    const result = await this.rpc("apply_cloud_review_batch", {
       p_job_id: jobId,
       p_worker_id: this.env.WORKER_ID,
       p_segments: segments,
@@ -99,6 +102,8 @@ export class SupabaseJobRepository implements QueueRepository {
       p_output_units: metrics.outputUnits ?? null,
       p_request_id: metrics.requestId ?? null
     });
+    if (!modelName.startsWith("@cf/")) await this.correctUsageProvider(jobId, "groq", modelName);
+    return result;
   }
 
   async materialInput(jobId: string): Promise<unknown> {
@@ -120,7 +125,7 @@ export class SupabaseJobRepository implements QueueRepository {
       requestId?: string;
     }
   ): Promise<unknown> {
-    return this.rpc("finish_cloud_material", {
+    const result = await this.rpc("finish_cloud_material", {
       p_job_id: jobId,
       p_worker_id: this.env.WORKER_ID,
       p_structured_content: structuredContent,
@@ -130,6 +135,16 @@ export class SupabaseJobRepository implements QueueRepository {
       p_input_units: metrics.inputUnits ?? null,
       p_output_units: metrics.outputUnits ?? null,
       p_request_id: metrics.requestId ?? null
+    });
+    if (!modelName.startsWith("@cf/")) await this.correctUsageProvider(jobId, "groq", modelName);
+    return result;
+  }
+
+  private async correctUsageProvider(jobId: string, provider: string, modelName: string) {
+    const query = new URLSearchParams({ processing_job_id: `eq.${jobId}` });
+    await this.request(`/rest/v1/usage_records?${query}`, {
+      method: "PATCH",
+      body: JSON.stringify({ provider, model_name: modelName.slice(0, 200) })
     });
   }
 

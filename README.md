@@ -170,6 +170,7 @@ Nenhum teste comum chama API paga. Veja [docs/testing.md](docs/testing.md).
 | `MAX_MATERIAL_UPLOAD_SIZE_MB`   | web/Worker         | Limite do Supabase Free: 50 MB por material.    |
 | `SIGNED_URL_TTL_SECONDS`        | web                | Validade dos downloads privados.                |
 | `OPENAI_API_KEY`                | Python opcional    | Nunca necessária no caminho gratuito.           |
+| `GROQ_API_KEY`                  | segredo Cloudflare | Capacidade gratuita principal de áudio e texto. |
 
 A lista completa e comentada está em [.env.example](.env.example).
 

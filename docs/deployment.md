@@ -106,6 +106,14 @@ SIGNED_URL_TTL_SECONDS=300
 
 O arquivo é ignorado pelo Git. A chave anon é publicável, mas continua sujeita a RLS; a service role não é variável pública.
 
+Para suportar até quatro aulas de 80 minutos por dia sem consumir a cota de áudio do Workers AI, crie uma chave no plano gratuito da Groq e grave-a como segredo do Worker:
+
+```powershell
+pnpm --filter @aula-clara/web exec wrangler secret put GROQ_API_KEY
+```
+
+A chave fica somente no Cloudflare. A fila respeita o limite gratuito de duas horas de áudio por janela horária e retoma automaticamente respostas `429`; o teto diário publicado pela Groq é de oito horas de áudio.
+
 ## Passo 4 — validar e publicar
 
 ```powershell

@@ -9,11 +9,17 @@ interface __BaseEnv_CloudflareEnv {
 	PROCESSING_DISPATCH_MODE: "cloudflare";
 	WORKER_ID: "aula-clara-cloudflare";
 	WORKER_LOCK_TTL_SECONDS: "900";
+	MAX_AUDIO_UPLOAD_SIZE_MB: "15";
+	MAX_MATERIAL_UPLOAD_SIZE_MB: "50";
 	MAX_TRANSCRIPTION_CHUNK_MB: "15";
 	CLOUDFLARE_TRANSCRIPTION_MODEL: "@cf/openai/whisper-large-v3-turbo";
 	CLOUDFLARE_REVIEW_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast";
 	CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast";
+	GROQ_TRANSCRIPTION_MODEL: "whisper-large-v3-turbo";
+	GROQ_REVIEW_MODEL: "openai/gpt-oss-20b";
+	GROQ_GENERATION_MODEL: "groq/compound";
 	SUPABASE_SERVICE_ROLE_KEY: string;
+	GROQ_API_KEY: string;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
@@ -26,7 +32,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SUPABASE_URL" | "PROCESSING_DISPATCH_MODE" | "WORKER_ID" | "WORKER_LOCK_TTL_SECONDS" | "MAX_TRANSCRIPTION_CHUNK_MB" | "CLOUDFLARE_TRANSCRIPTION_MODEL" | "CLOUDFLARE_REVIEW_MODEL" | "CLOUDFLARE_GENERATION_MODEL" | "SUPABASE_SERVICE_ROLE_KEY">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SUPABASE_URL" | "PROCESSING_DISPATCH_MODE" | "WORKER_ID" | "WORKER_LOCK_TTL_SECONDS" | "MAX_AUDIO_UPLOAD_SIZE_MB" | "MAX_MATERIAL_UPLOAD_SIZE_MB" | "MAX_TRANSCRIPTION_CHUNK_MB" | "CLOUDFLARE_TRANSCRIPTION_MODEL" | "CLOUDFLARE_REVIEW_MODEL" | "CLOUDFLARE_GENERATION_MODEL" | "GROQ_TRANSCRIPTION_MODEL" | "GROQ_REVIEW_MODEL" | "GROQ_GENERATION_MODEL" | "SUPABASE_SERVICE_ROLE_KEY" | "GROQ_API_KEY">> {}
 }
 
 // Begin runtime types

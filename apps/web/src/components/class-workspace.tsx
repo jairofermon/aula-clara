@@ -630,11 +630,21 @@ export function ClassWorkspace({
             </p>
           )}
           {progress.error_message && (
-            <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">
+            <div
+              className={`mt-4 rounded-lg p-3 text-sm ${
+                progress.status === "failed"
+                  ? "bg-red-50 text-red-800"
+                  : "bg-amber-50 text-amber-900"
+              }`}
+            >
               <p>{progress.error_message}</p>
-              <button className="mt-3 font-bold underline" onClick={() => void retry()}>
-                Repetir etapa com falha
-              </button>
+              {progress.status === "failed" ? (
+                <button className="mt-3 font-bold underline" onClick={() => void retry()}>
+                  Repetir etapa com falha
+                </button>
+              ) : (
+                <p className="mt-2 font-bold">Retomada automática — nenhuma ação necessária.</p>
+              )}
             </div>
           )}
           <a
