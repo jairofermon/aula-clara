@@ -24,6 +24,31 @@ interface StructuredResult<T> {
   requestId?: string;
 }
 
+function withProviderTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new JobProcessingError(
+          "provider_timeout",
+          "O provedor demorou demais e a próxima opção será tentada.",
+          true,
+          5
+        )
+      );
+    }, timeoutMs);
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 function classifyWorkersAiError(error: unknown): JobProcessingError {
   if (error instanceof JobProcessingError) return error;
   const details = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
@@ -131,7 +156,8 @@ async function runStructured<T>(
   payload: unknown,
   jsonObjectMode = false,
   maxTokens = 6000,
-  cloudflareFallbackModel = env.CLOUDFLARE_GENERATION_MODEL
+  cloudflareFallbackModel = env.CLOUDFLARE_GENERATION_MODEL,
+  providerTimeoutMs = 45_000
 ): Promise<StructuredResult<T>> {
   const jsonSchema = z.toJSONSchema(schema);
   const messages = [
@@ -153,17 +179,20 @@ async function runStructured<T>(
   if (groqEnabled(env)) {
     try {
       const strictSchema = model.startsWith("openai/gpt-oss");
-      const result = await chatWithGroq(
-        env,
-        model,
-        messages,
-        strictSchema
-          ? {
-              type: "json_schema",
-              json_schema: { name: "aula_clara_response", strict: true, schema: jsonSchema }
-            }
-          : { type: "json_object" },
-        maxTokens
+      const result = await withProviderTimeout(
+        chatWithGroq(
+          env,
+          model,
+          messages,
+          strictSchema
+            ? {
+                type: "json_schema",
+                json_schema: { name: "aula_clara_response", strict: true, schema: jsonSchema }
+              }
+            : { type: "json_object" },
+          maxTokens
+        ),
+        providerTimeoutMs
       );
       return validateStructuredResponse(result.response, schema, result);
     } catch (error) {
@@ -172,14 +201,20 @@ async function runStructured<T>(
   }
   if (geminiEnabled(env)) {
     try {
-      const result = await chatWithGemini(env, messages, maxTokens);
+      const result = await withProviderTimeout(
+        chatWithGemini(env, messages, maxTokens),
+        providerTimeoutMs
+      );
       return validateStructuredResponse(result.response, schema, result);
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
   }
   try {
-    const raw = await env.AI.run(cloudflareFallbackModel, cloudflareRequest);
+    const raw = await withProviderTimeout(
+      Promise.resolve(env.AI.run(cloudflareFallbackModel, cloudflareRequest)),
+      providerTimeoutMs
+    );
     return validateStructuredResponse(raw, schema, {
       requestId: env.AI.aiGatewayLogId ?? undefined
     });
@@ -188,7 +223,10 @@ async function runStructured<T>(
   }
   if (openRouterEnabled(env)) {
     try {
-      const result = await chatWithOpenRouter(env, messages, maxTokens);
+      const result = await withProviderTimeout(
+        chatWithOpenRouter(env, messages, maxTokens),
+        providerTimeoutMs
+      );
       return validateStructuredResponse(result.response, schema, result);
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
@@ -396,7 +434,8 @@ export async function reviewWholeTranscriptWithWorkersAi(
     },
     true,
     16000,
-    env.CLOUDFLARE_GENERATION_MODEL
+    env.CLOUDFLARE_GENERATION_MODEL,
+    20_000
   );
   if (result.data.checked_segments !== segments.length) {
     throw new JobProcessingError(

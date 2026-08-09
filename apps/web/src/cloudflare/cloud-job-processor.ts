@@ -440,23 +440,27 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       };
     }
     const startedAt = Date.now();
-    const result = await reviewWholeTranscriptWithWorkersAi(
-      this.env,
-      input.segments,
-      input.context
-    );
-    const model = activeGenerationModel(this.env);
+    let result: Awaited<ReturnType<typeof reviewWholeTranscriptWithWorkersAi>> | null = null;
+    let model = activeGenerationModel(this.env);
+    try {
+      result = await reviewWholeTranscriptWithWorkersAi(this.env, input.segments, input.context);
+    } catch (error) {
+      if (!(error instanceof JobProcessingError)) throw error;
+      // A revisão individual por IA já foi persistida em todos os segmentos.
+      // A segunda leitura global é uma melhoria e nunca pode bloquear a entrega.
+      model = "segment-review-validated";
+    }
     const applied = applyGlobalReviewResultSchema.parse(
       await this.repository.applyGlobalReview(
         job.id,
-        result.data.patches.map((patch) => ({ ...patch })),
-        result.data.checked_segments,
+        result?.data.patches.map((patch) => ({ ...patch })) ?? [],
+        result?.data.checked_segments ?? input.segments.length,
         model,
         {
           durationMs: Date.now() - startedAt,
-          inputUnits: result.inputUnits,
-          outputUnits: result.outputUnits,
-          requestId: result.requestId
+          inputUnits: result?.inputUnits,
+          outputUnits: result?.outputUnits,
+          requestId: result?.requestId
         }
       )
     );
@@ -465,6 +469,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       output: {
         checked: applied.checked,
         patches_applied: applied.applied,
+        global_review_fallback: result === null,
         transcript_validated: true,
         study_ready: false
       },

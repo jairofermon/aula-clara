@@ -10,9 +10,12 @@ export default {
   fetch: nextHandler.fetch,
 
   async queue(batch: MessageBatch<ProcessingQueueMessage>, env: CloudflareEnv) {
-    const repository = new SupabaseJobRepository(env);
-    const processor = createCloudJobProcessor(env, repository);
     for (const message of batch.messages) {
+      const deliveryEnv = Object.assign(Object.create(env) as CloudflareEnv, {
+        WORKER_ID: `${env.WORKER_ID}:${crypto.randomUUID()}`
+      });
+      const repository = new SupabaseJobRepository(deliveryEnv);
+      const processor = createCloudJobProcessor(deliveryEnv, repository);
       const result = await consumeDelivery(
         message,
         repository,

@@ -105,4 +105,57 @@ describe("processador gratuito", () => {
     );
     expect(result.output).toMatchObject({ reviewed: 2, needs_review: 0 });
   });
+
+  it("não bloqueia a entrega quando todos os provedores falham na segunda revisão", async () => {
+    const summaryJobId = "00000000-0000-4000-8000-000000000020";
+    const applyGlobalReview = vi.fn().mockResolvedValue({
+      applied: 0,
+      checked: 1,
+      summary_job_id: summaryJobId
+    });
+    const repository = {
+      globalReviewInput: vi.fn().mockResolvedValue({
+        context: "Aula de teste",
+        already_completed: false,
+        summary_job_id: null,
+        segments: [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000010",
+            raw_text: "Texto já revisado por segmento.",
+            start_ms: 0,
+            end_ms: 1000
+          }
+        ]
+      }),
+      applyGlobalReview
+    } as unknown as SupabaseJobRepository;
+    const env = {
+      AI: { run: vi.fn().mockResolvedValue({ response: "JSON inválido" }), aiGatewayLogId: null },
+      CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      CLOUDFLARE_REVIEW_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      MAX_TRANSCRIPTION_CHUNK_MB: "15"
+    } as unknown as CloudflareEnv;
+    const globalJob = {
+      ...job,
+      job_type: "review_transcript" as const,
+      input_json: { phase: "global" }
+    };
+
+    const result = await createCloudJobProcessor(env, repository).process(globalJob);
+
+    expect(applyGlobalReview).toHaveBeenCalledWith(
+      job.id,
+      [],
+      1,
+      "segment-review-validated",
+      expect.any(Object)
+    );
+    expect(result.output).toMatchObject({
+      checked: 1,
+      patches_applied: 0,
+      global_review_fallback: true,
+      transcript_validated: true
+    });
+    expect(result.nextJobIds).toEqual([summaryJobId]);
+  });
 });
