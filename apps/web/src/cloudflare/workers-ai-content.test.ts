@@ -75,19 +75,21 @@ describe("conteúdo estruturado do Workers AI", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("preserva a transcrição quando o Groq recusa também o trecho isolado", async () => {
+  it("usa o provedor alternativo quando o Groq recusa também o trecho isolado", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response("solicitação recusada", { status: 400 }));
     vi.stubGlobal("fetch", fetchMock);
+    const env = groqEnv();
+    vi.mocked(env.AI.run).mockResolvedValue({ response: "Texto claro e corrigido pela IA." });
 
     await expect(
       reviewWithWorkersAi(
-        groqEnv(),
+        env,
         [
           {
             segment_id: "00000000-0000-4000-8000-000000000001",
-            raw_text: "Texto original preservado",
+            raw_text: "texto claro e corrigido pela ia",
             start_ms: 0,
             end_ms: 1000
           }
@@ -99,13 +101,38 @@ describe("conteúdo estruturado do Workers AI", () => {
         segments: [
           {
             segment_id: "00000000-0000-4000-8000-000000000001",
-            revised_text: "Texto original preservado",
-            confidence: 0.5
+            revised_text: "Texto claro e corrigido pela IA.",
+            confidence: 0.75
           }
         ]
       }
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(env.AI.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("não marca texto bruto como revisado quando nenhum provedor entrega correção válida", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("solicitação recusada", { status: 400 }))
+    );
+    const env = groqEnv();
+    vi.mocked(env.AI.run).mockResolvedValue({ response: "" });
+
+    await expect(
+      reviewWithWorkersAi(
+        env,
+        [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            raw_text: "texto ainda não revisado",
+            start_ms: 0,
+            end_ms: 1000
+          }
+        ],
+        "contexto"
+      )
+    ).rejects.toMatchObject({ code: "invalid_provider_schema", transient: true });
   });
 
   it("recupera revisão com índice inválido usando texto simples", async () => {

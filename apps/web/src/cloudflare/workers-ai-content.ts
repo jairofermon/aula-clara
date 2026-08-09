@@ -192,20 +192,19 @@ async function reviewSingleAsPlainText(
     }
   } catch (error) {
     const failure = classifyWorkersAiError(error);
-    if (failure.code === "groq_invalid_request") {
-      return {
-        data: {
-          segments: [
-            {
-              segment_id: segment.segment_id,
-              revised_text: segment.raw_text,
-              confidence: 0.5
-            }
-          ]
-        }
-      };
+    if (failure.code !== "groq_invalid_request" || !groqEnabled(env)) {
+      throw failure;
     }
-    throw failure;
+    try {
+      raw = await env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
+        messages,
+        temperature: 0.1,
+        max_tokens: 3000
+      });
+      requestId = env.AI.aiGatewayLogId ?? undefined;
+    } catch (fallbackError) {
+      throw classifyWorkersAiError(fallbackError);
+    }
   }
 
   const envelope = workersAiJsonResponseSchema.safeParse(raw);
@@ -225,13 +224,21 @@ async function reviewSingleAsPlainText(
   const usable =
     revised.length >= minimumLength && revised.length <= maximumLength && !revised.startsWith("{");
 
+  if (!usable) {
+    throw new JobProcessingError(
+      "invalid_provider_schema",
+      "A revisão não produziu um texto final válido. Uma nova tentativa será feita automaticamente.",
+      true
+    );
+  }
+
   return {
     data: {
       segments: [
         {
           segment_id: segment.segment_id,
-          revised_text: usable ? revised : segment.raw_text,
-          confidence: usable ? 0.75 : 0.5
+          revised_text: revised,
+          confidence: 0.75
         }
       ]
     },
@@ -258,7 +265,7 @@ export async function reviewWithWorkersAi(
       env,
       activeReviewModel(env),
       indexedReviewBatchSchema,
-      `${REVIEW_RULES} Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
+      `${REVIEW_RULES} Leia os segmentos como partes consecutivas da mesma aula. Corrija erros de reconhecimento, pontuação, concordância e frases quebradas para produzir uma transcrição clara, coerente e fácil de entender, sem resumir, omitir exemplos ou inventar informações. Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
       {
         segments: segments.map((segment, index) => ({
           index,
