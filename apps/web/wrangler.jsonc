@@ -51,7 +51,7 @@
     "GROQ_REVIEW_MODEL": "openai/gpt-oss-20b",
     "GROQ_GENERATION_MODEL": "groq/compound",
     "GEMINI_GENERATION_MODEL": "gemini-2.5-flash",
-    "GEMINI_DATA_PROCESSING_CONSENT": "disabled",
+    "GEMINI_DATA_PROCESSING_CONSENT": "accepted",
     "OPENROUTER_GENERATION_MODEL": "openrouter/free",
     "OPENROUTER_DATA_PROCESSING_CONSENT": "disabled"
   }
