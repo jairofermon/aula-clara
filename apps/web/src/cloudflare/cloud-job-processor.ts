@@ -25,6 +25,7 @@ import {
 } from "./groq-provider";
 import { geminiEnabled, transcribeWithGemini } from "./gemini-provider";
 import { assemblyAiEnabled, transcribeWithAssemblyAi } from "./assemblyai-provider";
+import { deepgramEnabled, transcribeWithDeepgram } from "./deepgram-provider";
 import {
   generateWithWorkersAi,
   markdownForMaterial,
@@ -243,8 +244,24 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           providerName = "assemblyai";
         } catch (error) {
           const assemblyFailure = classifyAiError(error);
-          if (existingAssemblyTranscriptId) throw assemblyFailure;
+          if (
+            existingAssemblyTranscriptId &&
+            assemblyFailure.code === "assemblyai_still_processing"
+          )
+            throw assemblyFailure;
           failure = failure ? soonerRetry(failure, assemblyFailure) : assemblyFailure;
+        }
+      }
+      if (response === undefined && deepgramEnabled(this.env)) {
+        try {
+          const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
+          const result = await transcribeWithDeepgram(this.env, audio, filename, input.language);
+          response = result.data;
+          providerModel = result.model;
+          providerName = "deepgram";
+        } catch (error) {
+          const deepgramFailure = classifyAiError(error);
+          failure = failure ? soonerRetry(failure, deepgramFailure) : deepgramFailure;
         }
       }
       if (response === undefined) {

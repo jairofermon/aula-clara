@@ -63,7 +63,7 @@ Não há FFmpeg no Cloudflare nesta etapa. MP3/WAV/WebM/M4A compatível segue di
 `TranscriptionProvider.transcribe()` recebe path local, idioma, dica contextual limitada e opção de diarização. O resultado normalizado contém texto, início/fim em milissegundos, falante opcional e confiança opcional.
 
 - O provider OpenAI usa configuração centralizada.
-- O roteador tenta Groq Whisper Large V3, AssemblyAI Universal-3 Pro, Workers AI e Gemini habilitado, nessa ordem.
+- O roteador tenta Groq Whisper Large V3, AssemblyAI Universal-3 Pro, Deepgram Nova-3, Workers AI e Gemini habilitado, nessa ordem.
 - Limite, indisponibilidade ou credencial recusada em um fornecedor provoca troca imediata; somente o esgotamento de todas as rotas produz retry persistido.
 - Gemini só é usado quando a chave e `GEMINI_DATA_PROCESSING_CONSENT=accepted` estão presentes.
 - O fake gera segmentos determinísticos para testes.
@@ -114,7 +114,7 @@ Cada resultado limitado ou potencialmente cobrado é persistido antes de complet
 
 O ranking é reavaliado no início de cada chunk ou lote, permitindo que o provedor principal volte a ser usado assim que se recuperar:
 
-1. áudio: Groq Whisper Large V3, AssemblyAI Universal-3 Pro, Workers AI Whisper e Gemini;
+1. áudio: Groq Whisper Large V3, AssemblyAI Universal-3 Pro, Deepgram Nova-3, Workers AI Whisper e Gemini;
 2. revisão por trecho: Groq Llama Instant, Gemini Flash, Workers AI Llama e OpenRouter Free;
 3. revisão global e materiais: Groq Compound, Gemini Flash, Workers AI Llama e OpenRouter Free.
 

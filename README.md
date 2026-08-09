@@ -12,7 +12,7 @@ Navegador → Cloudflare Workers/OpenNext → Supabase Auth/PostgreSQL/Storage
            transcrição, revisão e materiais persistidos
 ```
 
-A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui créditos da OpenAI API. O caminho gratuito usa Groq e Workers AI, com AssemblyAI e Gemini como reservas; `OPENAI_API_KEY` permanece opcional e exclusiva do worker Python local.
+A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui créditos da OpenAI API. O caminho gratuito usa Groq e Workers AI, com AssemblyAI, Deepgram e Gemini como reservas; `OPENAI_API_KEY` permanece opcional e exclusiva do worker Python local.
 
 ## O que já funciona
 
@@ -172,6 +172,7 @@ Nenhum teste comum chama API paga. Veja [docs/testing.md](docs/testing.md).
 | `OPENAI_API_KEY`                | Python opcional    | Nunca necessária no caminho gratuito.             |
 | `GROQ_API_KEY`                  | segredo Cloudflare | Capacidade gratuita principal de áudio e texto.   |
 | `ASSEMBLYAI_API_KEY`            | segredo Cloudflare | Reserva assíncrona de alta precisão para áudio.   |
+| `DEEPGRAM_API_KEY`              | segredo Cloudflare | Reserva Nova-3 com diarização e timestamps.       |
 | `GEMINI_API_KEY`                | segredo Cloudflare | Reserva opcional para áudio, revisão e materiais. |
 | `OPENROUTER_API_KEY`            | segredo Cloudflare | Reserva opcional para revisão e materiais.        |
 

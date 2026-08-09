@@ -123,6 +123,24 @@ pnpm exec wrangler secret put ASSEMBLYAI_API_KEY
 
 O ID assíncrono retornado pelo AssemblyAI é persistido no job antes da espera. Uma interrupção retoma o mesmo pedido, sem reenviar o áudio ou criar outra transcrição.
 
+Para habilitar a reserva seguinte de áudio, grave a chave do Deepgram:
+
+```bash
+cd apps/web
+pnpm exec wrangler secret put DEEPGRAM_API_KEY
+```
+
+O Deepgram usa Nova-3 com português, formatação inteligente, timestamps por trecho e diarização atual.
+
+Para habilitar a última reserva de revisão e materiais, grave a chave do OpenRouter e aceite conscientemente o roteamento de texto no `wrangler.jsonc`:
+
+```bash
+cd apps/web
+pnpm exec wrangler secret put OPENROUTER_API_KEY
+```
+
+O modelo `openrouter/free` mantém custo de inferência em zero; indisponibilidade ou limite diário gera retry/fallback, nunca troca automática para um modelo pago.
+
 Reservas opcionais, sempre sem cobrança automática:
 
 ```powershell
