@@ -125,7 +125,7 @@ O roteiro completo, incluindo teste real e solução de erros, está em [docs/de
 - sem diarização: falante fica nulo quando o modelo não o identifica;
 - sem FFmpeg no Cloudflare nesta etapa; vídeos/áudios que exijam conversão devem ser convertidos antes do envio;
 - PDF é produzido no navegador, sem Chromium pago no servidor;
-- cotas gratuitas podem pausar o processamento até a renovação; não existe fallback automático para serviço pago;
+- o roteador alterna automaticamente entre os provedores gratuitos configurados e reinicia o ciclo a cada 15–60 segundos quando todos estiverem ocupados; capacidade gratuita simultaneamente indisponível ainda pode atrasar a conclusão;
 - o Supabase gratuito pode pausar projeto inativo e possui limites de banco/Storage.
 
 O caminho Python local continua disponível para chunks com FFmpeg, provider OpenAI opcional e PDF por Playwright. Consulte [desenvolvimento local](docs/local-development.md) somente se quiser usá-lo.

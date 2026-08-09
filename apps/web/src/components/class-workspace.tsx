@@ -553,11 +553,6 @@ export function ClassWorkspace({
   async function retry() {
     await fetch(`/api/classes/${initialClass.id}/retry`, { method: "POST" });
   }
-  async function repairTranscript() {
-    if (!window.confirm("Refazer a transcrição usando o próximo provedor disponível?")) return;
-    await fetch(`/api/classes/${initialClass.id}/repair-transcript`, { method: "POST" });
-  }
-
   return (
     <main className="mx-auto max-w-7xl px-5 py-7">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -710,12 +705,6 @@ export function ClassWorkspace({
           >
             Abrir diagnóstico técnico
           </a>
-          <button
-            className="mt-4 block text-left text-sm font-bold text-[#176b58] underline"
-            onClick={() => void repairTranscript()}
-          >
-            Refazer transcrição com outro provedor
-          </button>
         </aside>
       </section>
       <MaterialsPanel classId={initialClass.id} classTitle={initialClass.title} />

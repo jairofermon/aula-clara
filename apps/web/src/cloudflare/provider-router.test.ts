@@ -1,12 +1,41 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { transcribeWithGemini } from "./gemini-provider";
 import { generateWithWorkersAi } from "./workers-ai-content";
+import type { JobProcessingError } from "./contracts";
 
 afterEach(() => vi.unstubAllGlobals());
 
 const segmentId = "00000000-0000-4000-8000-000000000001";
 
 describe("roteamento entre provedores gratuitos", () => {
+  it("agenda um novo ciclo somente depois de consultar todos os provedores disponíveis", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("busy", { status: 429 })));
+    const env = {
+      AI: {
+        run: vi.fn().mockRejectedValue(new Error("3036 daily free allocation")),
+        aiGatewayLogId: null
+      },
+      GROQ_API_KEY: "gsk_test_key_long_enough",
+      GROQ_GENERATION_MODEL: "groq/compound",
+      CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      GEMINI_DATA_PROCESSING_CONSENT: "disabled",
+      OPENROUTER_DATA_PROCESSING_CONSENT: "disabled"
+    } as unknown as CloudflareEnv;
+
+    await expect(
+      generateWithWorkersAi(
+        env,
+        "summary",
+        [{ segment_id: segmentId, start_ms: 0, end_ms: 1000, speaker_label: null, text: "Texto" }],
+        { title: "Aula" }
+      )
+    ).rejects.toMatchObject({
+      code: "all_text_providers_failed",
+      transient: true,
+      retryDelaySeconds: expect.any(Number)
+    } satisfies Partial<JobProcessingError>);
+    expect(env.AI.run).toHaveBeenCalledTimes(1);
+  });
   it("usa Gemini para áudio e preserva segmentos temporais válidos", async () => {
     vi.stubGlobal(
       "fetch",

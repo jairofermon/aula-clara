@@ -88,7 +88,7 @@ Título, disciplina, professor, glossário e texto extraído dos slides formam u
 
 O Whisper pode devolver centenas de fragmentos de poucos segundos. Quando a versão original ultrapassa 200 segmentos, o pipeline preserva essa versão 1 para auditoria e cria uma versão operacional compacta, agrupando 12 fragmentos consecutivos. Os limites globais em milissegundos continuam exatos e a tela deixa de exibir centenas de cartões sem contexto.
 
-Os segmentos operacionais são enviados em lotes de até 24 itens. Para evitar que o modelo copie incorretamente UUIDs longos, cada chamada usa índices curtos e ordenados; o servidor associa os índices de volta aos IDs imutáveis. A resposta final contém somente índice, texto corrigido e confiança e passa por schema Zod estrito. O lote inteiro é descartado se houver índice ausente/desconhecido, duplicação, campo extra inválido ou valor fora de faixa. Quando o modelo não preserva todos os índices ou devolve JSON/schema inválido, o worker subdivide o lote recursivamente e valida cada novo lote antes de persistir, evitando repetir trechos já corrigidos.
+Os segmentos operacionais são enviados em lotes de até 40 itens. Para evitar que o modelo copie incorretamente UUIDs longos, cada chamada usa índices curtos e ordenados; o servidor associa os índices de volta aos IDs imutáveis. A resposta final contém somente índice, texto corrigido e confiança e passa por schema Zod estrito. O lote inteiro é descartado se houver índice ausente/desconhecido, duplicação, campo extra inválido ou valor fora de faixa. Quando o modelo não preserva todos os índices ou devolve JSON/schema inválido, o worker subdivide o lote recursivamente e valida cada novo lote antes de persistir, evitando repetir trechos já corrigidos.
 
 Quando resta apenas um segmento e o modelo ainda não consegue produzir JSON válido, o worker solicita a correção como texto simples. Se essa resposta vier vazia, resumida ou excessivamente longa, o texto bruto preservado é usado para concluir o trecho. Erros de formato do fornecedor, portanto, não interrompem mais a aula nem exigem ação manual.
 
@@ -110,7 +110,7 @@ A geração é liberada depois da revisão global. O resumo é automático e lib
 
 ## Capacidade e failover
 
-Cada resultado limitado ou potencialmente cobrado é persistido antes de completar o job. Reentrega e troca de fornecedor consultam essa persistência e não repetem uma etapa concluída. Groq, Cloudflare, Gemini e OpenRouter possuem limites independentes; o sistema usa o primeiro resultado válido e registra modelo, duração e unidades. Não existe promessa de capacidade ilimitada em serviços gratuitos: quando todos estiverem simultaneamente sem cota, o job permanece seguro em `retry_wait`, com retomada automática na janela mais próxima.
+Cada resultado limitado ou potencialmente cobrado é persistido antes de completar o job. Reentrega e troca de fornecedor consultam essa persistência e não repetem uma etapa concluída. Groq, Cloudflare, Gemini e OpenRouter possuem limites independentes; o sistema usa o primeiro resultado válido e registra modelo, duração e unidades. Quando um provedor falha, o mesmo ciclo consulta imediatamente todos os seguintes. Se todos estiverem simultaneamente indisponíveis, o job permanece em `retry_wait` por 15 a 60 segundos e reinicia o ranking automaticamente, sem botão e sem limite terminal de tentativas para etapas de IA.
 
 O ranking é reavaliado no início de cada chunk ou lote, permitindo que o provedor principal volte a ser usado assim que se recuperar:
 

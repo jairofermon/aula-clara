@@ -251,11 +251,6 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           providerName = "assemblyai";
         } catch (error) {
           const assemblyFailure = classifyAiError(error);
-          if (
-            existingAssemblyTranscriptId &&
-            assemblyFailure.code === "assemblyai_still_processing"
-          )
-            throw assemblyFailure;
           failure = failure ? soonerRetry(failure, assemblyFailure) : assemblyFailure;
         }
       }
@@ -308,7 +303,15 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           failure = failure ? soonerRetry(failure, geminiFailure) : geminiFailure;
         }
       }
-      if (!segments.length) throw failure ?? classifyAiError(new Error("no provider"));
+      if (!segments.length) {
+        const nextRetrySeconds = Math.max(15, Math.min(failure?.retryDelaySeconds ?? 15, 60));
+        throw new JobProcessingError(
+          "all_transcription_providers_failed",
+          "Todos os transcritores disponíveis foram consultados. O sistema continuará alternando automaticamente até concluir.",
+          true,
+          nextRetrySeconds
+        );
+      }
       providerDurationMs = Date.now() - startedAt;
     }
 
@@ -412,9 +415,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     let reviewed = 0;
     let needsReview = 0;
     for (let batchNumber = 0; batchNumber < 10; batchNumber += 1) {
-      const input = reviewInputSchema.parse(
-        await this.repository.reviewBatch(job.id, groqEnabled(this.env) ? 12 : 24)
-      );
+      const input = reviewInputSchema.parse(await this.repository.reviewBatch(job.id, 40));
       if ("error_code" in input) rpcFailure(input.error_code);
       if (!input.segments.length) {
         return { output: { reviewed, needs_review: needsReview, resumed: reviewed === 0 } };

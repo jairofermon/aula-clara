@@ -255,7 +255,27 @@ async function runStructured<T>(
       failures.push(classifyWorkersAiError(error));
     }
   }
-  throw failures.slice(1).reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
+  const schemaFailure = failures.find((failure) =>
+    [
+      "invalid_provider_json",
+      "invalid_provider_schema",
+      "groq_request_too_large",
+      "groq_invalid_request",
+      "material_quality_insufficient",
+      "material_source_mismatch",
+      "material_timestamp_mismatch"
+    ].includes(failure.code)
+  );
+  if (schemaFailure) throw schemaFailure;
+  const nextRetry = failures
+    .slice(1)
+    .reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
+  throw new JobProcessingError(
+    "all_text_providers_failed",
+    "Todos os provedores de IA disponíveis foram consultados. O sistema continuará alternando automaticamente até concluir.",
+    true,
+    Math.max(15, Math.min(nextRetry.retryDelaySeconds ?? 15, 60))
+  );
 }
 
 async function reviewSingleAsPlainText(
@@ -360,7 +380,21 @@ async function reviewSingleAsPlainText(
       failures.push(classifyWorkersAiError(error));
     }
   }
-  throw failures.slice(1).reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
+  const schemaFailure = failures.find((failure) =>
+    ["invalid_provider_json", "invalid_provider_schema", "groq_request_too_large"].includes(
+      failure.code
+    )
+  );
+  if (schemaFailure) throw schemaFailure;
+  const nextRetry = failures
+    .slice(1)
+    .reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
+  throw new JobProcessingError(
+    "all_text_providers_failed",
+    "Todos os provedores de IA disponíveis foram consultados. O sistema continuará alternando automaticamente até concluir.",
+    true,
+    Math.max(15, Math.min(nextRetry.retryDelaySeconds ?? 15, 60))
+  );
 }
 
 export async function reviewWithWorkersAi(

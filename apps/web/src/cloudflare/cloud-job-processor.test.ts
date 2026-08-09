@@ -87,7 +87,7 @@ describe("processador gratuito", () => {
     const result = await createCloudJobProcessor(env, repository).process(reviewJob);
 
     expect(run).toHaveBeenCalledTimes(3);
-    expect(repository.reviewBatch).toHaveBeenCalledWith(job.id, 24);
+    expect(repository.reviewBatch).toHaveBeenCalledWith(job.id, 40);
     expect(applyReviewBatch).toHaveBeenCalledTimes(2);
     expect(applyReviewBatch).toHaveBeenNthCalledWith(
       1,

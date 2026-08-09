@@ -231,9 +231,9 @@ describe("conteúdo estruturado do Workers AI", () => {
         "contexto"
       )
     ).rejects.toMatchObject({
-      code: "groq_free_rate_limit",
+      code: "all_text_providers_failed",
       transient: true,
-      retryDelaySeconds: 3600
+      retryDelaySeconds: 60
     });
   });
 
