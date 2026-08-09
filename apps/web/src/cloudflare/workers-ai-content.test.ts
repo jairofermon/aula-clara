@@ -144,6 +144,71 @@ describe("conteúdo estruturado do Workers AI", () => {
     expect(env.AI.run).toHaveBeenCalledTimes(1);
   });
 
+  it("troca de provedor na mesma execução quando o primeiro retorna JSON inválido", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "groq-invalid",
+          choices: [{ message: { content: "resposta sem json" } }]
+        })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          responseId: "gemini-valid",
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      segments: [
+                        {
+                          index: 0,
+                          revised_text: "Texto corrigido pelo segundo provedor.",
+                          confidence: 0.9
+                        }
+                      ]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      ...groqEnv(),
+      GEMINI_API_KEY: "gemini_test_key_long_enough",
+      GEMINI_DATA_PROCESSING_CONSENT: "accepted",
+      GEMINI_GENERATION_MODEL: "gemini-2.5-flash"
+    } as unknown as CloudflareEnv;
+
+    await expect(
+      reviewWithWorkersAi(
+        env,
+        [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            raw_text: "texto corrigido pelo segundo provedor",
+            start_ms: 0,
+            end_ms: 1000
+          }
+        ],
+        "contexto"
+      )
+    ).resolves.toMatchObject({
+      data: {
+        segments: [
+          expect.objectContaining({ revised_text: "Texto corrigido pelo segundo provedor." })
+        ]
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(env.AI.run).not.toHaveBeenCalled();
+  });
+
   it("aguarda a janela gratuita que renovar primeiro quando os dois provedores esgotam", async () => {
     vi.stubGlobal(
       "fetch",

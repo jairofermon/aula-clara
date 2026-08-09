@@ -95,6 +95,32 @@ function parseJsonValue(value: unknown): unknown {
   }
 }
 
+function validateStructuredResponse<T>(
+  raw: unknown,
+  schema: z.ZodType<T>,
+  metrics: { inputUnits?: number; outputUnits?: number; requestId?: string } = {}
+): StructuredResult<T> {
+  const envelope = workersAiJsonResponseSchema.safeParse(raw);
+  const candidate = parseJsonValue(envelope.success ? envelope.data.response : raw);
+  const parsed = schema.safeParse(candidate);
+  if (!parsed.success) {
+    throw new JobProcessingError(
+      "invalid_provider_schema",
+      "O modelo não respeitou o formato esperado. O próximo provedor será tentado.",
+      true
+    );
+  }
+  return {
+    data: parsed.data,
+    inputUnits:
+      metrics.inputUnits ?? (envelope.success ? envelope.data.usage?.prompt_tokens : undefined),
+    outputUnits:
+      metrics.outputUnits ??
+      (envelope.success ? envelope.data.usage?.completion_tokens : undefined),
+    requestId: metrics.requestId
+  };
+}
+
 async function runStructured<T>(
   env: CloudflareEnv,
   model: string,
@@ -105,10 +131,6 @@ async function runStructured<T>(
   maxTokens = 6000,
   cloudflareFallbackModel = env.CLOUDFLARE_GENERATION_MODEL
 ): Promise<StructuredResult<T>> {
-  let raw: unknown;
-  let inputUnits: number | undefined;
-  let outputUnits: number | undefined;
-  let requestId: string | undefined;
   const jsonSchema = z.toJSONSchema(schema);
   const messages = [
     {
@@ -141,65 +163,36 @@ async function runStructured<T>(
           : { type: "json_object" },
         maxTokens
       );
-      raw = result.response;
-      inputUnits = result.inputUnits;
-      outputUnits = result.outputUnits;
-      requestId = result.requestId;
+      return validateStructuredResponse(result.response, schema, result);
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
   }
-  if (raw === undefined && geminiEnabled(env)) {
+  if (geminiEnabled(env)) {
     try {
       const result = await chatWithGemini(env, messages, maxTokens);
-      raw = result.response;
-      inputUnits = result.inputUnits;
-      outputUnits = result.outputUnits;
-      requestId = result.requestId;
+      return validateStructuredResponse(result.response, schema, result);
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
   }
-  if (raw === undefined) {
-    try {
-      raw = await env.AI.run(cloudflareFallbackModel, cloudflareRequest);
-      requestId = env.AI.aiGatewayLogId ?? undefined;
-    } catch (error) {
-      failures.push(classifyWorkersAiError(error));
-    }
+  try {
+    const raw = await env.AI.run(cloudflareFallbackModel, cloudflareRequest);
+    return validateStructuredResponse(raw, schema, {
+      requestId: env.AI.aiGatewayLogId ?? undefined
+    });
+  } catch (error) {
+    failures.push(classifyWorkersAiError(error));
   }
-  if (raw === undefined && openRouterEnabled(env)) {
+  if (openRouterEnabled(env)) {
     try {
       const result = await chatWithOpenRouter(env, messages, maxTokens);
-      raw = result.response;
-      inputUnits = result.inputUnits;
-      outputUnits = result.outputUnits;
-      requestId = result.requestId;
+      return validateStructuredResponse(result.response, schema, result);
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
   }
-  if (raw === undefined) {
-    throw failures.slice(1).reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
-  }
-
-  const envelope = workersAiJsonResponseSchema.safeParse(raw);
-  const candidate = parseJsonValue(envelope.success ? envelope.data.response : raw);
-  const parsed = schema.safeParse(candidate);
-  if (!parsed.success) {
-    throw new JobProcessingError(
-      "invalid_provider_schema",
-      "O modelo não respeitou o formato esperado. Uma nova tentativa será feita.",
-      true
-    );
-  }
-  return {
-    data: parsed.data,
-    inputUnits: inputUnits ?? (envelope.success ? envelope.data.usage?.prompt_tokens : undefined),
-    outputUnits:
-      outputUnits ?? (envelope.success ? envelope.data.usage?.completion_tokens : undefined),
-    requestId: requestId ?? env.AI.aiGatewayLogId ?? undefined
-  };
+  throw failures.slice(1).reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
 }
 
 async function reviewSingleAsPlainText(
@@ -217,10 +210,6 @@ async function reviewSingleAsPlainText(
     segments: Array<{ segment_id: string; revised_text: string; confidence: number }>;
   }>
 > {
-  let raw: unknown;
-  let inputUnits: number | undefined;
-  let outputUnits: number | undefined;
-  let requestId: string | undefined;
   const messages = [
     {
       role: "system" as const,
@@ -231,85 +220,83 @@ async function reviewSingleAsPlainText(
       content: `Contexto: ${context.slice(0, 3000)}\n\nTranscrição: ${segment.raw_text}`
     }
   ];
-  try {
-    if (groqEnabled(env)) {
-      const result = await chatWithGroq(env, model, messages, undefined, 3000);
-      raw = result.response;
-      inputUnits = result.inputUnits;
-      outputUnits = result.outputUnits;
-      requestId = result.requestId;
-    } else {
-      raw = await env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
-        messages,
-        temperature: 0.1,
-        max_tokens: 3000
-      });
-    }
-  } catch (error) {
-    const failure = classifyWorkersAiError(error);
-    if (
-      ![
-        "groq_invalid_request",
-        "groq_free_rate_limit",
-        "groq_unavailable",
-        "groq_request_too_large"
-      ].includes(failure.code) ||
-      !groqEnabled(env)
-    ) {
-      throw failure;
-    }
+  const validate = (
+    raw: unknown,
+    metrics: { inputUnits?: number; outputUnits?: number; requestId?: string } = {}
+  ) => {
+    const envelope = workersAiJsonResponseSchema.safeParse(raw);
+    const candidate = envelope.success ? envelope.data.response : raw;
+    let revised = typeof candidate === "string" ? candidate.trim() : "";
+    const fenced = revised.match(/^\s*```(?:text|markdown)?\s*([\s\S]*?)\s*```\s*$/iu)?.[1];
+    if (fenced) revised = fenced.trim();
     try {
-      raw = await env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
-        messages,
-        temperature: 0.1,
-        max_tokens: 3000
-      });
-      requestId = env.AI.aiGatewayLogId ?? undefined;
-    } catch (fallbackError) {
-      throw earliestRetry(failure, classifyWorkersAiError(fallbackError));
+      const decoded = JSON.parse(revised) as unknown;
+      if (typeof decoded === "string") revised = decoded.trim();
+    } catch {
+      // A resposta esperada aqui é texto simples, não JSON.
+    }
+
+    const minimumLength = segment.raw_text.length > 120 ? segment.raw_text.length * 0.35 : 1;
+    const maximumLength = Math.max(1000, segment.raw_text.length * 3);
+    const usable =
+      revised.length >= minimumLength &&
+      revised.length <= maximumLength &&
+      !revised.startsWith("{");
+    if (!usable) {
+      throw new JobProcessingError(
+        "invalid_provider_schema",
+        "A revisão não produziu texto válido. O próximo provedor será tentado.",
+        true
+      );
+    }
+    return {
+      data: {
+        segments: [{ segment_id: segment.segment_id, revised_text: revised, confidence: 0.75 }]
+      },
+      inputUnits:
+        metrics.inputUnits ?? (envelope.success ? envelope.data.usage?.prompt_tokens : undefined),
+      outputUnits:
+        metrics.outputUnits ??
+        (envelope.success ? envelope.data.usage?.completion_tokens : undefined),
+      requestId: metrics.requestId
+    };
+  };
+  const failures: JobProcessingError[] = [];
+  if (groqEnabled(env)) {
+    try {
+      const result = await chatWithGroq(env, model, messages, undefined, 3000);
+      return validate(result.response, result);
+    } catch (error) {
+      failures.push(classifyWorkersAiError(error));
     }
   }
-
-  const envelope = workersAiJsonResponseSchema.safeParse(raw);
-  const candidate = envelope.success ? envelope.data.response : raw;
-  let revised = typeof candidate === "string" ? candidate.trim() : "";
-  const fenced = revised.match(/^\s*```(?:text|markdown)?\s*([\s\S]*?)\s*```\s*$/iu)?.[1];
-  if (fenced) revised = fenced.trim();
+  if (geminiEnabled(env)) {
+    try {
+      const result = await chatWithGemini(env, messages, 3000);
+      return validate(result.response, result);
+    } catch (error) {
+      failures.push(classifyWorkersAiError(error));
+    }
+  }
   try {
-    const decoded = JSON.parse(revised) as unknown;
-    if (typeof decoded === "string") revised = decoded.trim();
-  } catch {
-    // A resposta esperada aqui é texto simples, não JSON.
+    const raw = await env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
+      messages,
+      temperature: 0.1,
+      max_tokens: 3000
+    });
+    return validate(raw, { requestId: env.AI.aiGatewayLogId ?? undefined });
+  } catch (error) {
+    failures.push(classifyWorkersAiError(error));
   }
-
-  const minimumLength = segment.raw_text.length > 120 ? segment.raw_text.length * 0.35 : 1;
-  const maximumLength = Math.max(1000, segment.raw_text.length * 3);
-  const usable =
-    revised.length >= minimumLength && revised.length <= maximumLength && !revised.startsWith("{");
-
-  if (!usable) {
-    throw new JobProcessingError(
-      "invalid_provider_schema",
-      "A revisão não produziu um texto final válido. Uma nova tentativa será feita automaticamente.",
-      true
-    );
+  if (openRouterEnabled(env)) {
+    try {
+      const result = await chatWithOpenRouter(env, messages, 3000);
+      return validate(result.response, result);
+    } catch (error) {
+      failures.push(classifyWorkersAiError(error));
+    }
   }
-
-  return {
-    data: {
-      segments: [
-        {
-          segment_id: segment.segment_id,
-          revised_text: revised,
-          confidence: 0.75
-        }
-      ]
-    },
-    inputUnits: inputUnits ?? (envelope.success ? envelope.data.usage?.prompt_tokens : undefined),
-    outputUnits:
-      outputUnits ?? (envelope.success ? envelope.data.usage?.completion_tokens : undefined),
-    requestId: requestId ?? env.AI.aiGatewayLogId ?? undefined
-  };
+  throw failures.slice(1).reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
 }
 
 export async function reviewWithWorkersAi(
