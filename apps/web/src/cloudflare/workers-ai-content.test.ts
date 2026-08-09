@@ -108,7 +108,68 @@ describe("conteúdo estruturado do Workers AI", () => {
       }
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(env.AI.run).toHaveBeenCalledTimes(2);
+  });
+
+  it("usa o provedor alternativo quando a cota temporária do Groq é atingida", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("limite temporário", { status: 429 }))
+    );
+    const env = groqEnv();
+    vi.mocked(env.AI.run).mockResolvedValue({
+      response: {
+        segments: [{ index: 0, revised_text: "Texto corrigido sem interrupção.", confidence: 0.9 }]
+      }
+    });
+
+    await expect(
+      reviewWithWorkersAi(
+        env,
+        [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            raw_text: "texto corrigido sem interrupção",
+            start_ms: 0,
+            end_ms: 1000
+          }
+        ],
+        "contexto"
+      )
+    ).resolves.toMatchObject({
+      data: {
+        segments: [expect.objectContaining({ revised_text: "Texto corrigido sem interrupção." })]
+      }
+    });
     expect(env.AI.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("aguarda a janela gratuita que renovar primeiro quando os dois provedores esgotam", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("limite temporário", { status: 429 }))
+    );
+    const env = groqEnv();
+    vi.mocked(env.AI.run).mockRejectedValue(new Error("3036 daily free allocation exceeded"));
+
+    await expect(
+      reviewWithWorkersAi(
+        env,
+        [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            raw_text: "texto aguardando revisão",
+            start_ms: 0,
+            end_ms: 1000
+          }
+        ],
+        "contexto"
+      )
+    ).rejects.toMatchObject({
+      code: "groq_free_rate_limit",
+      transient: true,
+      retryDelaySeconds: 3600
+    });
   });
 
   it("não marca texto bruto como revisado quando nenhum provedor entrega correção válida", async () => {

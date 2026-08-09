@@ -42,6 +42,17 @@ function classifyWorkersAiError(error: unknown): JobProcessingError {
   );
 }
 
+function earliestRetry(
+  primary: JobProcessingError,
+  fallback: JobProcessingError
+): JobProcessingError {
+  if (!primary.transient) return fallback;
+  if (!fallback.transient) return primary;
+  return (primary.retryDelaySeconds ?? 3600) <= (fallback.retryDelaySeconds ?? 3600)
+    ? primary
+    : fallback;
+}
+
 const indexedReviewedSegmentSchema = z
   .object({
     index: z.number().int().nonnegative(),
@@ -96,6 +107,14 @@ async function runStructured<T>(
     },
     { role: "user" as const, content: JSON.stringify(payload) }
   ];
+  const cloudflareRequest = {
+    messages,
+    response_format: jsonObjectMode
+      ? { type: "json_object" }
+      : { type: "json_schema", json_schema: jsonSchema },
+    temperature: 0.1,
+    max_tokens: maxTokens
+  };
   try {
     if (groqEnabled(env)) {
       const strictSchema = model.startsWith("openai/gpt-oss");
@@ -116,17 +135,29 @@ async function runStructured<T>(
       outputUnits = result.outputUnits;
       requestId = result.requestId;
     } else {
-      raw = await env.AI.run(model, {
-        messages,
-        response_format: jsonObjectMode
-          ? { type: "json_object" }
-          : { type: "json_schema", json_schema: jsonSchema },
-        temperature: 0.1,
-        max_tokens: maxTokens
-      });
+      raw = await env.AI.run(model, cloudflareRequest);
     }
   } catch (error) {
-    throw classifyWorkersAiError(error);
+    const failure = classifyWorkersAiError(error);
+    const canUseCloudflareFallback =
+      groqEnabled(env) &&
+      [
+        "groq_invalid_request",
+        "groq_free_rate_limit",
+        "groq_unavailable",
+        "groq_request_too_large"
+      ].includes(failure.code);
+    if (!canUseCloudflareFallback) throw failure;
+    const fallbackModel =
+      model === env.GROQ_REVIEW_MODEL
+        ? env.CLOUDFLARE_REVIEW_MODEL
+        : env.CLOUDFLARE_GENERATION_MODEL;
+    try {
+      raw = await env.AI.run(fallbackModel, cloudflareRequest);
+      requestId = env.AI.aiGatewayLogId ?? undefined;
+    } catch (fallbackError) {
+      throw earliestRetry(failure, classifyWorkersAiError(fallbackError));
+    }
   }
 
   const envelope = workersAiJsonResponseSchema.safeParse(raw);
@@ -192,7 +223,15 @@ async function reviewSingleAsPlainText(
     }
   } catch (error) {
     const failure = classifyWorkersAiError(error);
-    if (failure.code !== "groq_invalid_request" || !groqEnabled(env)) {
+    if (
+      ![
+        "groq_invalid_request",
+        "groq_free_rate_limit",
+        "groq_unavailable",
+        "groq_request_too_large"
+      ].includes(failure.code) ||
+      !groqEnabled(env)
+    ) {
       throw failure;
     }
     try {
@@ -203,7 +242,7 @@ async function reviewSingleAsPlainText(
       });
       requestId = env.AI.aiGatewayLogId ?? undefined;
     } catch (fallbackError) {
-      throw classifyWorkersAiError(fallbackError);
+      throw earliestRetry(failure, classifyWorkersAiError(fallbackError));
     }
   }
 
