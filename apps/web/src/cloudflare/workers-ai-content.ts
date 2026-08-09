@@ -16,6 +16,25 @@ interface StructuredResult<T> {
   requestId?: string;
 }
 
+function classifyWorkersAiError(error: unknown): JobProcessingError {
+  const details = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
+  if (details.includes("3036") || details.includes("daily free allocation")) {
+    const now = new Date();
+    const nextUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 1);
+    return new JobProcessingError(
+      "cloudflare_daily_quota",
+      "A cota gratuita diária de inteligência artificial foi atingida. O processamento será retomado após a renovação.",
+      true,
+      Math.max(60, Math.ceil((nextUtc - now.getTime()) / 1000))
+    );
+  }
+  return new JobProcessingError(
+    "cloudflare_ai_unavailable",
+    "O serviço de geração está temporariamente indisponível.",
+    true
+  );
+}
+
 const indexedReviewedSegmentSchema = z
   .object({
     index: z.number().int().nonnegative(),
@@ -77,22 +96,7 @@ async function runStructured<T>(
       max_tokens: 6000
     });
   } catch (error) {
-    const details = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
-    if (details.includes("3036") || details.includes("daily free allocation")) {
-      const now = new Date();
-      const nextUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 1);
-      throw new JobProcessingError(
-        "cloudflare_daily_quota",
-        "A cota gratuita diária de inteligência artificial foi atingida. O processamento será retomado após a renovação.",
-        true,
-        Math.max(60, Math.ceil((nextUtc - now.getTime()) / 1000))
-      );
-    }
-    throw new JobProcessingError(
-      "cloudflare_ai_unavailable",
-      "O serviço de geração está temporariamente indisponível.",
-      true
-    );
+    throw classifyWorkersAiError(error);
   }
 
   const envelope = workersAiJsonResponseSchema.safeParse(raw);
@@ -113,6 +117,73 @@ async function runStructured<T>(
   };
 }
 
+async function reviewSingleAsPlainText(
+  env: CloudflareEnv,
+  segment: {
+    segment_id: string;
+    raw_text: string;
+    start_ms: number;
+    end_ms: number;
+  },
+  context: string
+): Promise<
+  StructuredResult<{
+    segments: Array<{ segment_id: string; revised_text: string; confidence: number }>;
+  }>
+> {
+  let raw: unknown;
+  try {
+    raw = await env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
+      messages: [
+        {
+          role: "system",
+          content: `${REVIEW_RULES} Retorne somente o texto final corrigido, sem JSON, título, explicação, aspas ou Markdown.`
+        },
+        {
+          role: "user",
+          content: `Contexto: ${context.slice(0, 3000)}\n\nTranscrição: ${segment.raw_text}`
+        }
+      ],
+      temperature: 0.1,
+      max_tokens: 3000
+    });
+  } catch (error) {
+    throw classifyWorkersAiError(error);
+  }
+
+  const envelope = workersAiJsonResponseSchema.safeParse(raw);
+  const candidate = envelope.success ? envelope.data.response : raw;
+  let revised = typeof candidate === "string" ? candidate.trim() : "";
+  const fenced = revised.match(/^\s*```(?:text|markdown)?\s*([\s\S]*?)\s*```\s*$/iu)?.[1];
+  if (fenced) revised = fenced.trim();
+  try {
+    const decoded = JSON.parse(revised) as unknown;
+    if (typeof decoded === "string") revised = decoded.trim();
+  } catch {
+    // A resposta esperada aqui é texto simples, não JSON.
+  }
+
+  const minimumLength = segment.raw_text.length > 120 ? segment.raw_text.length * 0.35 : 1;
+  const maximumLength = Math.max(1000, segment.raw_text.length * 3);
+  const usable =
+    revised.length >= minimumLength && revised.length <= maximumLength && !revised.startsWith("{");
+
+  return {
+    data: {
+      segments: [
+        {
+          segment_id: segment.segment_id,
+          revised_text: usable ? revised : segment.raw_text,
+          confidence: usable ? 0.75 : 0.5
+        }
+      ]
+    },
+    inputUnits: envelope.success ? envelope.data.usage?.prompt_tokens : undefined,
+    outputUnits: envelope.success ? envelope.data.usage?.completion_tokens : undefined,
+    requestId: env.AI.aiGatewayLogId ?? undefined
+  };
+}
+
 export async function reviewWithWorkersAi(
   env: CloudflareEnv,
   segments: ReadonlyArray<{
@@ -123,27 +194,39 @@ export async function reviewWithWorkersAi(
   }>,
   context: string
 ) {
-  const result = await runStructured(
-    env,
-    env.CLOUDFLARE_REVIEW_MODEL,
-    indexedReviewBatchSchema,
-    `${REVIEW_RULES} Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
-    {
-      segments: segments.map((segment, index) => ({
-        index,
-        raw_text: segment.raw_text,
-        start_ms: segment.start_ms,
-        end_ms: segment.end_ms
-      })),
-      context: context.slice(0, 8000)
+  let result: Awaited<ReturnType<typeof runStructured<z.infer<typeof indexedReviewBatchSchema>>>>;
+  try {
+    result = await runStructured(
+      env,
+      env.CLOUDFLARE_REVIEW_MODEL,
+      indexedReviewBatchSchema,
+      `${REVIEW_RULES} Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
+      {
+        segments: segments.map((segment, index) => ({
+          index,
+          raw_text: segment.raw_text,
+          start_ms: segment.start_ms,
+          end_ms: segment.end_ms
+        })),
+        context: context.slice(0, 8000)
+      }
+    );
+  } catch (error) {
+    const recoverableFormatError =
+      error instanceof JobProcessingError &&
+      ["invalid_provider_json", "invalid_provider_schema"].includes(error.code);
+    if (recoverableFormatError && segments.length === 1) {
+      return reviewSingleAsPlainText(env, segments[0]!, context);
     }
-  );
+    throw error;
+  }
   const returned = result.data.segments.map((segment) => segment.index);
   if (
     returned.length !== segments.length ||
     new Set(returned).size !== returned.length ||
     returned.some((index) => index < 0 || index >= segments.length)
   ) {
+    if (segments.length === 1) return reviewSingleAsPlainText(env, segments[0]!, context);
     throw new JobProcessingError(
       "review_segment_ids_mismatch",
       "A revisão não preservou os segmentos recebidos. Uma nova tentativa será feita.",

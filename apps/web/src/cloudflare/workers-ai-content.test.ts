@@ -23,18 +23,21 @@ const transcript = [
 ] as const;
 
 describe("conteúdo estruturado do Workers AI", () => {
-  it("rejeita revisão que troca o índice do segmento", async () => {
-    const env = cloudflareEnv({
-      response: {
-        segments: [
-          {
-            index: 99,
-            revised_text: "Texto revisado.",
-            confidence: 0.9
-          }
-        ]
-      }
-    });
+  it("recupera revisão com índice inválido usando texto simples", async () => {
+    const env = cloudflareEnv(null);
+    vi.mocked(env.AI.run)
+      .mockResolvedValueOnce({
+        response: {
+          segments: [
+            {
+              index: 99,
+              revised_text: "Texto revisado.",
+              confidence: 0.9
+            }
+          ]
+        }
+      })
+      .mockResolvedValueOnce({ response: "Texto final corrigido." });
     await expect(
       reviewWithWorkersAi(
         env,
@@ -48,7 +51,45 @@ describe("conteúdo estruturado do Workers AI", () => {
         ],
         "contexto"
       )
-    ).rejects.toMatchObject({ code: "review_segment_ids_mismatch" });
+    ).resolves.toMatchObject({
+      data: {
+        segments: [
+          expect.objectContaining({
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            revised_text: "Texto final corrigido."
+          })
+        ]
+      }
+    });
+    expect(env.AI.run).toHaveBeenCalledTimes(2);
+  });
+
+  it("recupera JSON inválido usando texto simples", async () => {
+    const env = cloudflareEnv(null);
+    vi.mocked(env.AI.run)
+      .mockResolvedValueOnce({ response: "isto não é json" })
+      .mockResolvedValueOnce({ response: "A fotossíntese transforma energia luminosa." });
+
+    await expect(
+      reviewWithWorkersAi(
+        env,
+        [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000001",
+            raw_text: "A fotossíntese transforma energia luminosa",
+            start_ms: 0,
+            end_ms: 1000
+          }
+        ],
+        "contexto"
+      )
+    ).resolves.toMatchObject({
+      data: {
+        segments: [
+          expect.objectContaining({ revised_text: "A fotossíntese transforma energia luminosa." })
+        ]
+      }
+    });
   });
 
   it("rejeita material que cita segmento inexistente", async () => {
