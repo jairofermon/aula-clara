@@ -141,12 +141,7 @@ async function runStructured<T>(
     const failure = classifyWorkersAiError(error);
     const canUseCloudflareFallback =
       groqEnabled(env) &&
-      [
-        "groq_invalid_request",
-        "groq_free_rate_limit",
-        "groq_unavailable",
-        "groq_request_too_large"
-      ].includes(failure.code);
+      ["groq_free_rate_limit", "groq_unavailable", "groq_request_too_large"].includes(failure.code);
     if (!canUseCloudflareFallback) throw failure;
     const fallbackModel =
       model === env.GROQ_REVIEW_MODEL
