@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  flashcardsContentSchema,
+  mindmapContentSchema,
+  notesContentSchema,
+  questionsContentSchema
+} from "@aula-clara/shared";
 import type { ProcessingJob } from "./contracts";
 import { createCloudJobProcessor } from "./cloud-job-processor";
 import type { SupabaseJobRepository } from "./supabase-job-repository";
@@ -249,4 +255,59 @@ describe("processador gratuito", () => {
     );
     expect(result.output).toMatchObject({ material_id: materialId, material_type: "summary" });
   });
+
+  it.each([
+    ["notes", "generate_notes", notesContentSchema],
+    ["flashcards", "generate_flashcards", flashcardsContentSchema],
+    ["questions", "generate_questions", questionsContentSchema],
+    ["mindmap", "generate_mindmap", mindmapContentSchema]
+  ] as const)(
+    "conclui %s com fallback validado quando todo o ranking falha",
+    async (type, jobType, schema) => {
+      const materialId = "00000000-0000-4000-8000-000000000030";
+      const finishMaterial = vi
+        .fn()
+        .mockResolvedValue({ material_id: materialId, completed: true });
+      const transcript = Array.from({ length: 12 }, (_, index) => ({
+        segment_id: `00000000-0000-4000-8000-${(index + 10).toString().padStart(12, "0")}`,
+        start_ms: index * 60_000,
+        end_ms: (index + 1) * 60_000,
+        speaker_label: null,
+        text: `Conteúdo completo e específico do tópico ${index + 1}, com explicação suficiente para estudo.`
+      }));
+      const repository = {
+        materialInput: vi.fn().mockResolvedValue({
+          material_id: materialId,
+          material_type: type,
+          source_transcript_version: 3,
+          already_completed: false,
+          class_context: {
+            title: "Aula de teste",
+            topic: "Tema",
+            teacher_name: null,
+            class_date: "2026-08-09",
+            language: "pt",
+            subject_name: "Disciplina"
+          },
+          transcript
+        }),
+        finishMaterial
+      } as unknown as SupabaseJobRepository;
+      const env = {
+        AI: { run: vi.fn().mockResolvedValue({ response: "inválido" }), aiGatewayLogId: null },
+        CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+        MAX_TRANSCRIPTION_CHUNK_MB: "15"
+      } as unknown as CloudflareEnv;
+
+      const result = await createCloudJobProcessor(env, repository).process({
+        ...job,
+        job_type: jobType
+      });
+
+      const structuredContent = finishMaterial.mock.calls[0]?.[1];
+      expect(schema.parse(structuredContent)).toEqual(structuredContent);
+      expect(finishMaterial.mock.calls[0]?.[3]).toBe(`extractive-${type}-after-provider-failover`);
+      expect(result.output).toMatchObject({ material_id: materialId, material_type: type });
+    }
+  );
 });

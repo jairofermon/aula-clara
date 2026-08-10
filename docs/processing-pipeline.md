@@ -110,6 +110,8 @@ A geração é liberada depois da revisão global. O resumo é automático e lib
 
 O resumo consulta todo o ranking de IA com timeout limitado por provedor. Se nenhuma resposta válida estiver disponível, o worker produz imediatamente um resumo extrativo distribuído por toda a transcrição validada, com referências e timestamps reais. Esse fallback mantém a aula utilizável e impede que o estado de 95% bloqueie a entrega; uma resposta de IA válida continua sendo sempre a opção prioritária.
 
+A mesma garantia terminal vale para o pacote completo. Depois de consultar todo o ranking, o worker pode montar a apostila integral por blocos cronológicos, flashcards distribuídos pela duração, questões de associação temporal com cinco alternativas e explicações, e mapa mental hierárquico com Mermaid sanitizado. Esses fallbacks são validados pelos mesmos schemas dos materiais gerados por IA. Enquanto houver um material solicitado pendente, a API exibe progresso real entre 96% e 99% e informa quantos itens estão prontos; 100% é reservado ao pacote totalmente concluído.
+
 ## Capacidade e failover
 
 Cada resultado limitado ou potencialmente cobrado é persistido antes de completar o job. Reentrega e troca de fornecedor consultam essa persistência e não repetem uma etapa concluída. Groq, Cloudflare, Gemini e OpenRouter possuem limites independentes; o sistema usa o primeiro resultado válido e registra modelo, duração e unidades. Quando um provedor falha, o mesmo ciclo consulta imediatamente todos os seguintes. Se todos estiverem simultaneamente indisponíveis, o job permanece em `retry_wait` por 15 a 60 segundos e reinicia o ranking automaticamente, sem botão e sem limite terminal de tentativas para etapas de IA.

@@ -108,6 +108,122 @@ function extractiveSummaryFallback(
   };
 }
 
+function clockLabel(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+    : `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+
+type MaterialTranscript = Parameters<typeof extractiveSummaryFallback>[0];
+
+function transcriptSamples(transcript: MaterialTranscript, requested = 12) {
+  const count = Math.min(requested, transcript.length);
+  return Array.from({ length: count }, (_, index) => {
+    const position = count === 1 ? 0 : Math.round((index * (transcript.length - 1)) / (count - 1));
+    return transcript[position]!;
+  });
+}
+
+function cleanExcerpt(text: string, maximum = 420): string {
+  const clean = text.replace(/\s+/gu, " ").trim();
+  return clean.length > maximum ? `${clean.slice(0, maximum - 3).trim()}...` : clean;
+}
+
+function fallbackStudyMaterial(
+  materialType: Exclude<GeneratableMaterial, "summary">,
+  transcript: MaterialTranscript,
+  classTitle: string
+): Record<string, unknown> {
+  const sampled = transcriptSamples(transcript, Math.min(20, Math.max(10, transcript.length)));
+  if (materialType === "notes") {
+    const groupSize = Math.max(1, Math.ceil(transcript.length / 12));
+    const sections = Array.from(
+      { length: Math.ceil(transcript.length / groupSize) },
+      (_, groupIndex) => {
+        const group = transcript.slice(groupIndex * groupSize, (groupIndex + 1) * groupSize);
+        const first = group[0]!;
+        return {
+          title: `Conteúdo a partir de ${clockLabel(first.start_ms)}`,
+          body: group.map((segment) => cleanExcerpt(segment.text, 2000)).join(" "),
+          timestamp_ms: first.start_ms,
+          source_segment_ids: group.map((segment) => segment.segment_id)
+        };
+      }
+    );
+    return {
+      title: `Apostila — ${classTitle}`,
+      chronological_index: sections.map((section) => section.title),
+      sections,
+      teacher_examples: [],
+      emphasized_points: sampled.slice(0, 8).map((segment) => cleanExcerpt(segment.text)),
+      remaining_questions: []
+    };
+  }
+  if (materialType === "flashcards") {
+    return {
+      flashcards: sampled.map((segment, index) => ({
+        id: `fallback-card-${index + 1}`,
+        front: `Explique o conteúdo apresentado por volta de ${clockLabel(segment.start_ms)}.`,
+        back: cleanExcerpt(segment.text, 800),
+        timestamp_ms: segment.start_ms,
+        tags: ["revisão", "transcrição"],
+        difficulty: (["medium", "hard", "easy"] as const)[index % 3],
+        source_segment_ids: [segment.segment_id]
+      }))
+    };
+  }
+  if (materialType === "questions") {
+    return {
+      questions: sampled.map((segment, index) => {
+        const alternatives = Array.from({ length: 5 }, (_, offset) => {
+          const source = sampled[(index + offset) % sampled.length]!;
+          return { id: `a${offset + 1}`, text: cleanExcerpt(source.text, 260) };
+        });
+        return {
+          id: `fallback-question-${index + 1}`,
+          question: `Qual alternativa corresponde ao conteúdo apresentado em ${clockLabel(segment.start_ms)}?`,
+          alternatives,
+          correct_alternative_id: "a1",
+          correct_explanation: `A alternativa A reproduz o conteúdo associado ao timestamp ${clockLabel(segment.start_ms)}.`,
+          incorrect_explanations: Object.fromEntries(
+            alternatives
+              .slice(1)
+              .map((alternative) => [
+                alternative.id,
+                "Esse conteúdo pertence a outro momento da aula e não ao timestamp indicado."
+              ])
+          ),
+          difficulty: (["medium", "hard", "medium"] as const)[index % 3],
+          timestamp_ms: segment.start_ms,
+          source_segment_ids: [segment.segment_id]
+        };
+      })
+    };
+  }
+  const labels = sampled.map((segment, index) => ({
+    id: `topic-${index + 1}`,
+    label: `${clockLabel(segment.start_ms)} — ${cleanExcerpt(segment.text, 90)}`,
+    children: []
+  }));
+  const mermaidLabels = labels.map((item) =>
+    item.label
+      .replace(/[^\p{L}\p{N}\s—-]/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim()
+  );
+  return {
+    title: `Mapa mental — ${classTitle}`,
+    root: { id: "root", label: classTitle, children: labels },
+    mermaid: ["mindmap", "  root((Aula))", ...mermaidLabels.map((label) => `    ${label}`)].join(
+      "\n"
+    )
+  };
+}
+
 type ReviewSegmentInput = {
   segment_id: string;
   raw_text: string;
@@ -546,10 +662,13 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
         input.class_context
       );
     } catch (error) {
-      if (!(error instanceof JobProcessingError) || materialType !== "summary") throw error;
+      if (!(error instanceof JobProcessingError)) throw error;
       generated = {
-        data: extractiveSummaryFallback(input.transcript),
-        modelName: "extractive-summary-after-provider-failover"
+        data:
+          materialType === "summary"
+            ? extractiveSummaryFallback(input.transcript)
+            : fallbackStudyMaterial(materialType, input.transcript, input.class_context.title),
+        modelName: `extractive-${materialType}-after-provider-failover`
       };
     }
     const structuredContent = generated.data as Record<string, unknown>;
