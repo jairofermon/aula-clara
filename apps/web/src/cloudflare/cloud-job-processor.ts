@@ -72,7 +72,7 @@ function rpcFailure(errorCode: string): never {
   throw new JobProcessingError(errorCode, message, transient);
 }
 
-function extractiveSummaryFallback(
+export function extractiveSummaryFallback(
   transcript: Array<{
     segment_id: string;
     start_ms: number;
@@ -133,7 +133,7 @@ function cleanExcerpt(text: string, maximum = 420): string {
   return clean.length > maximum ? `${clean.slice(0, maximum - 3).trim()}...` : clean;
 }
 
-function fallbackStudyMaterial(
+export function fallbackStudyMaterial(
   materialType: Exclude<GeneratableMaterial, "summary">,
   transcript: MaterialTranscript,
   classTitle: string
@@ -540,14 +540,14 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     } catch (error) {
       const preserveAndContinue =
         error instanceof JobProcessingError &&
-        [
-          "all_text_providers_failed",
-          "review_segment_ids_mismatch",
-          "invalid_provider_json",
-          "invalid_provider_schema",
-          "groq_request_too_large",
-          "groq_invalid_request"
-        ].includes(error.code);
+        (error.code.startsWith("all_text_providers_failed:") ||
+          [
+            "review_segment_ids_mismatch",
+            "invalid_provider_json",
+            "invalid_provider_schema",
+            "groq_request_too_large",
+            "groq_invalid_request"
+          ].includes(error.code));
       if (preserveAndContinue) {
         const preserved = applyReviewResultSchema.parse(
           await this.repository.applyReviewBatch(
@@ -653,24 +653,12 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     if (input.material_type !== materialType) rpcFailure("invalid_material");
 
     const startedAt = Date.now();
-    let generated: Awaited<ReturnType<typeof generateWithWorkersAi>>;
-    try {
-      generated = await generateWithWorkersAi(
-        this.env,
-        materialType,
-        input.transcript,
-        input.class_context
-      );
-    } catch (error) {
-      if (!(error instanceof JobProcessingError)) throw error;
-      generated = {
-        data:
-          materialType === "summary"
-            ? extractiveSummaryFallback(input.transcript)
-            : fallbackStudyMaterial(materialType, input.transcript, input.class_context.title),
-        modelName: `extractive-${materialType}-after-provider-failover`
-      };
-    }
+    const generated = await generateWithWorkersAi(
+      this.env,
+      materialType,
+      input.transcript,
+      input.class_context
+    );
     const structuredContent = generated.data as Record<string, unknown>;
     const finished = finishMaterialResultSchema.parse(
       await this.repository.finishMaterial(

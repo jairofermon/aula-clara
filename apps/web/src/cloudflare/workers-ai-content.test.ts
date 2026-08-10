@@ -232,7 +232,7 @@ describe("conteúdo estruturado do Workers AI", () => {
         "contexto"
       )
     ).rejects.toMatchObject({
-      code: "all_text_providers_failed",
+      code: expect.stringContaining("all_text_providers_failed:"),
       transient: true,
       retryDelaySeconds: 60
     });
@@ -435,5 +435,61 @@ describe("conteúdo estruturado do Workers AI", () => {
       expect.any(String),
       expect.objectContaining({ response_format: { type: "json_object" } })
     );
+  });
+
+  it("divide uma aula longa e consolida capítulos produzidos por IA", async () => {
+    const run = vi.fn().mockImplementation(async (_model: string, request: unknown) => {
+      const messages = (request as { messages: Array<{ content: string }> }).messages;
+      const payload = JSON.parse(messages[1]!.content) as {
+        transcript: Array<{ segment_id: string; start_ms: number }>;
+      };
+      const source = payload.transcript[0]!;
+      const partNumber = run.mock.calls.length;
+      return {
+        response: {
+          title: "Apostila de Tanatologia",
+          chronological_index: [`Fundamentos da parte ${partNumber}`],
+          sections: [
+            {
+              title: `Fundamentos conceituais da parte ${partNumber}`,
+              body: "A seção explica de maneira didática os conceitos centrais apresentados pelo professor, relacionando definições, mecanismos, diferenças relevantes, aplicações práticas e consequências para o raciocínio clínico. O texto organiza o conteúdo acadêmico em uma sequência coerente, elimina repetições da fala e preserva os exemplos necessários para a compreensão e para a revisão posterior do estudante. ".repeat(
+                2
+              ),
+              timestamp_ms: source.start_ms,
+              source_segment_ids: [source.segment_id]
+            }
+          ],
+          teacher_examples: [],
+          emphasized_points: [`Ponto conceitual relevante da parte ${partNumber}.`],
+          remaining_questions: []
+        }
+      };
+    });
+    const env = {
+      ...cloudflareEnv({}),
+      AI: { run, aiGatewayLogId: null }
+    } as unknown as CloudflareEnv;
+    const longTranscript = Array.from({ length: 4 }, (_, index) => ({
+      segment_id: `00000000-0000-4000-8000-${(index + 1).toString().padStart(12, "0")}`,
+      start_ms: index * 60_000,
+      end_ms: (index + 1) * 60_000,
+      speaker_label: null,
+      text: `Explicação acadêmica da parte ${index + 1}. `.repeat(180)
+    }));
+
+    const result = await generateWithWorkersAi(env, "notes", longTranscript, {
+      title: "Tanatologia"
+    });
+
+    expect(run).toHaveBeenCalledTimes(4);
+    expect(result.data).toMatchObject({
+      chronological_index: [
+        "Fundamentos conceituais da parte 1",
+        "Fundamentos conceituais da parte 2",
+        "Fundamentos conceituais da parte 3",
+        "Fundamentos conceituais da parte 4"
+      ]
+    });
+    expect(result.modelName).toBe("ai-composed:@cf/meta/llama-3.1-8b-instruct-fast");
   });
 });

@@ -1,10 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  flashcardsContentSchema,
-  mindmapContentSchema,
-  notesContentSchema,
-  questionsContentSchema
-} from "@aula-clara/shared";
 import type { ProcessingJob } from "./contracts";
 import { createCloudJobProcessor } from "./cloud-job-processor";
 import type { SupabaseJobRepository } from "./supabase-job-repository";
@@ -196,13 +190,26 @@ describe("processador gratuito", () => {
     expect(result.nextJobIds).toEqual([summaryJobId]);
   });
 
-  it("conclui o resumo com extração da transcrição quando todo o ranking falha", async () => {
+  it.each([
+    ["summary", "generate_summary"],
+    ["notes", "generate_notes"],
+    ["flashcards", "generate_flashcards"],
+    ["questions", "generate_questions"],
+    ["mindmap", "generate_mindmap"]
+  ] as const)("não marca %s como pronto sem geração válida por IA", async (type, jobType) => {
     const materialId = "00000000-0000-4000-8000-000000000030";
     const finishMaterial = vi.fn().mockResolvedValue({ material_id: materialId, completed: true });
+    const transcript = Array.from({ length: 12 }, (_, index) => ({
+      segment_id: `00000000-0000-4000-8000-${(index + 10).toString().padStart(12, "0")}`,
+      start_ms: index * 60_000,
+      end_ms: (index + 1) * 60_000,
+      speaker_label: null,
+      text: `Conteúdo completo e específico do tópico ${index + 1}, com explicação suficiente para estudo.`
+    }));
     const repository = {
       materialInput: vi.fn().mockResolvedValue({
         material_id: materialId,
-        material_type: "summary",
+        material_type: type,
         source_transcript_version: 3,
         already_completed: false,
         class_context: {
@@ -213,22 +220,7 @@ describe("processador gratuito", () => {
           language: "pt",
           subject_name: "Disciplina"
         },
-        transcript: [
-          {
-            segment_id: "00000000-0000-4000-8000-000000000010",
-            start_ms: 0,
-            end_ms: 1000,
-            speaker_label: null,
-            text: "Explicação inicial completa da aula."
-          },
-          {
-            segment_id: "00000000-0000-4000-8000-000000000011",
-            start_ms: 1000,
-            end_ms: 2000,
-            speaker_label: null,
-            text: "Conclusão e pontos importantes da aula."
-          }
-        ]
+        transcript
       }),
       finishMaterial
     } as unknown as SupabaseJobRepository;
@@ -238,76 +230,9 @@ describe("processador gratuito", () => {
       MAX_TRANSCRIPTION_CHUNK_MB: "15"
     } as unknown as CloudflareEnv;
 
-    const result = await createCloudJobProcessor(env, repository).process({
-      ...job,
-      job_type: "generate_summary"
-    });
-
-    expect(finishMaterial).toHaveBeenCalledWith(
-      job.id,
-      expect.objectContaining({
-        overview: expect.stringContaining("Explicação inicial"),
-        references: expect.arrayContaining([expect.objectContaining({ timestamp_ms: 0 })])
-      }),
-      expect.any(String),
-      "extractive-summary-after-provider-failover",
-      expect.any(Object)
-    );
-    expect(result.output).toMatchObject({ material_id: materialId, material_type: "summary" });
+    await expect(
+      createCloudJobProcessor(env, repository).process({ ...job, job_type: jobType })
+    ).rejects.toMatchObject({ transient: true });
+    expect(finishMaterial).not.toHaveBeenCalled();
   });
-
-  it.each([
-    ["notes", "generate_notes", notesContentSchema],
-    ["flashcards", "generate_flashcards", flashcardsContentSchema],
-    ["questions", "generate_questions", questionsContentSchema],
-    ["mindmap", "generate_mindmap", mindmapContentSchema]
-  ] as const)(
-    "conclui %s com fallback validado quando todo o ranking falha",
-    async (type, jobType, schema) => {
-      const materialId = "00000000-0000-4000-8000-000000000030";
-      const finishMaterial = vi
-        .fn()
-        .mockResolvedValue({ material_id: materialId, completed: true });
-      const transcript = Array.from({ length: 12 }, (_, index) => ({
-        segment_id: `00000000-0000-4000-8000-${(index + 10).toString().padStart(12, "0")}`,
-        start_ms: index * 60_000,
-        end_ms: (index + 1) * 60_000,
-        speaker_label: null,
-        text: `Conteúdo completo e específico do tópico ${index + 1}, com explicação suficiente para estudo.`
-      }));
-      const repository = {
-        materialInput: vi.fn().mockResolvedValue({
-          material_id: materialId,
-          material_type: type,
-          source_transcript_version: 3,
-          already_completed: false,
-          class_context: {
-            title: "Aula de teste",
-            topic: "Tema",
-            teacher_name: null,
-            class_date: "2026-08-09",
-            language: "pt",
-            subject_name: "Disciplina"
-          },
-          transcript
-        }),
-        finishMaterial
-      } as unknown as SupabaseJobRepository;
-      const env = {
-        AI: { run: vi.fn().mockResolvedValue({ response: "inválido" }), aiGatewayLogId: null },
-        CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
-        MAX_TRANSCRIPTION_CHUNK_MB: "15"
-      } as unknown as CloudflareEnv;
-
-      const result = await createCloudJobProcessor(env, repository).process({
-        ...job,
-        job_type: jobType
-      });
-
-      const structuredContent = finishMaterial.mock.calls[0]?.[1];
-      expect(schema.parse(structuredContent)).toEqual(structuredContent);
-      expect(finishMaterial.mock.calls[0]?.[3]).toBe(`extractive-${type}-after-provider-failover`);
-      expect(result.output).toMatchObject({ material_id: materialId, material_type: type });
-    }
-  );
 });

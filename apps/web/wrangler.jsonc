@@ -24,6 +24,7 @@
         "queue": "aula-clara-processing",
         "max_batch_size": 1,
         "max_batch_timeout": 5,
+        "max_concurrency": 1,
         "max_retries": 4,
         "dead_letter_queue": "aula-clara-processing-dlq"
       }

@@ -203,6 +203,46 @@ function VirtualTranscript({
   );
 }
 
+function ContinuousTranscript({
+  segments,
+  activeId,
+  onSeek
+}: {
+  segments: TranscriptSegment[];
+  activeId?: string;
+  onSeek: (ms: number) => void;
+}) {
+  return (
+    <article
+      className="card max-h-[680px] overflow-auto p-5 sm:p-7"
+      aria-label="Transcrição contínua"
+    >
+      <div className="text-[1.02rem] leading-8 text-[#243b35]">
+        {segments.map((segment) => (
+          <span
+            className={
+              segment.id === activeId
+                ? "rounded bg-emerald-100 px-1 shadow-sm"
+                : "transition-colors"
+            }
+            id={`continuous-segment-${segment.id}`}
+            key={segment.id}
+          >
+            <button
+              className="mr-2 inline-flex rounded-md bg-[#edf5f1] px-2 py-0.5 font-mono text-xs font-black text-[#176b58] hover:bg-[#d9ebe4]"
+              onClick={() => onSeek(segment.start_ms)}
+              aria-label={`Ouvir a partir de ${formatTimestamp(segment.start_ms)}`}
+            >
+              {formatTimestamp(segment.start_ms)}
+            </button>
+            <span>{segment.revised_text ?? segment.raw_text}</span>{" "}
+          </span>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 function MaterialsPanel({ classId, classTitle }: { classId: string; classTitle: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [message, setMessage] = useState("");
@@ -488,6 +528,7 @@ export function ClassWorkspace({
   const [currentMs, setCurrentMs] = useState(0);
   const [durationMs, setDurationMs] = useState(initialClass.duration_ms ?? 0);
   const [search, setSearch] = useState("");
+  const [transcriptMode, setTranscriptMode] = useState<"continuous" | "segments">("continuous");
 
   const loadSegments = useCallback(async () => {
     const response = await fetch(`/api/classes/${initialClass.id}/transcript`);
@@ -648,12 +689,28 @@ export function ClassWorkspace({
                 onChange={(event) => setSearch(event.target.value)}
               />
             </label>
+            <div className="flex rounded-xl border border-[#dbe4df] bg-white p-1" role="group">
+              <button
+                className={`rounded-lg px-3 py-2 text-sm font-bold ${transcriptMode === "continuous" ? "bg-[#176b58] text-white" : "text-[#176b58]"}`}
+                onClick={() => setTranscriptMode("continuous")}
+              >
+                Leitura contínua
+              </button>
+              <button
+                className={`rounded-lg px-3 py-2 text-sm font-bold ${transcriptMode === "segments" ? "bg-[#176b58] text-white" : "text-[#176b58]"}`}
+                onClick={() => setTranscriptMode("segments")}
+              >
+                Editar por trecho
+              </button>
+            </div>
           </div>
           <p className="mb-4 text-sm text-[#61736f]">
             A correção é automática. Use os timestamps para consultar o áudio original quando quiser
             conferir o contexto.
           </p>
-          {filtered.length ? (
+          {filtered.length && transcriptMode === "continuous" ? (
+            <ContinuousTranscript segments={filtered} activeId={active?.id} onSeek={seek} />
+          ) : filtered.length ? (
             <VirtualTranscript
               segments={filtered}
               activeId={active?.id}

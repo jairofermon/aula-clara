@@ -4,7 +4,8 @@ import {
   mindmapContentSchema,
   notesContentSchema,
   questionsContentSchema,
-  summaryContentSchema
+  summaryContentSchema,
+  type MindmapNodeContent
 } from "@aula-clara/shared";
 import { REVIEW_RULES } from "@aula-clara/prompts";
 import { z } from "zod";
@@ -53,6 +54,14 @@ function withProviderTimeout<T>(operation: Promise<T>, timeoutMs: number): Promi
 
 function classifyWorkersAiError(error: unknown): JobProcessingError {
   if (error instanceof JobProcessingError) return error;
+  if (error instanceof z.ZodError) {
+    return new JobProcessingError(
+      "invalid_provider_schema",
+      "O provedor retornou uma estrutura inválida. A próxima opção será tentada.",
+      true,
+      5
+    );
+  }
   const details = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
   if (details.includes("3036") || details.includes("daily free allocation")) {
     const now = new Date();
@@ -185,6 +194,20 @@ async function runStructured<T>(
     max_tokens: maxTokens
   };
   const failures: JobProcessingError[] = [];
+  const rememberFailure = (provider: string, error: unknown) => {
+    const failure = classifyWorkersAiError(error);
+    failures.push(failure);
+    if (typeof env.WORKER_ID === "string") {
+      console.warn(
+        JSON.stringify({
+          event: "ai.provider_failed",
+          provider,
+          error_code: failure.code,
+          transient: failure.transient
+        })
+      );
+    }
+  };
   const accept = (
     raw: unknown,
     metrics: {
@@ -218,7 +241,7 @@ async function runStructured<T>(
       );
       return accept(result.response, { ...result, modelName: model });
     } catch (error) {
-      failures.push(classifyWorkersAiError(error));
+      rememberFailure("groq", error);
     }
   }
   if (geminiEnabled(env)) {
@@ -229,7 +252,7 @@ async function runStructured<T>(
       );
       return accept(result.response, { ...result, modelName: env.GEMINI_GENERATION_MODEL });
     } catch (error) {
-      failures.push(classifyWorkersAiError(error));
+      rememberFailure("gemini", error);
     }
   }
   try {
@@ -242,7 +265,7 @@ async function runStructured<T>(
       modelName: cloudflareFallbackModel
     });
   } catch (error) {
-    failures.push(classifyWorkersAiError(error));
+    rememberFailure("cloudflare", error);
   }
   if (openRouterEnabled(env)) {
     try {
@@ -252,7 +275,7 @@ async function runStructured<T>(
       );
       return accept(result.response, { ...result, modelName: env.OPENROUTER_GENERATION_MODEL });
     } catch (error) {
-      failures.push(classifyWorkersAiError(error));
+      rememberFailure("openrouter", error);
     }
   }
   const schemaFailure = failures.find((failure) =>
@@ -270,8 +293,13 @@ async function runStructured<T>(
   const nextRetry = failures
     .slice(1)
     .reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
+  const failureCodes = failures
+    .map((failure) => failure.code)
+    .filter((code, index, items) => items.indexOf(code) === index)
+    .join("+")
+    .slice(0, 180);
   throw new JobProcessingError(
-    "all_text_providers_failed",
+    `all_text_providers_failed:${failureCodes || "unknown"}`,
     "Todos os provedores de IA disponíveis foram consultados. O sistema continuará alternando automaticamente até concluir.",
     true,
     Math.max(15, Math.min(nextRetry.retryDelaySeconds ?? 15, 60))
@@ -492,7 +520,7 @@ export async function reviewWithWorkersAi(
       env,
       model,
       indexedReviewBatchSchema,
-      `${REVIEW_RULES} Leia os segmentos como partes consecutivas da mesma aula. Corrija erros de reconhecimento, pontuação, concordância e frases quebradas para produzir uma transcrição clara, coerente e fácil de entender, sem resumir, omitir exemplos ou inventar informações. Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
+      `${REVIEW_RULES} Leia os segmentos como partes consecutivas da mesma aula. Corrija erros de reconhecimento, pontuação, concordância e frases quebradas para produzir uma transcrição clara, coerente e fácil de entender. Preserve exatamente todos os índices recebidos, uma única vez e na mesma ordem. Entregue uma versão final utilizável; não crie pendências nem peça confirmação. Não use HTML.`,
       {
         segments: segments.map((segment, index) => ({
           index,
@@ -616,6 +644,172 @@ const materialSchemas = {
 
 export type GeneratableMaterial = keyof typeof materialSchemas;
 
+type MaterialTranscriptSegment = {
+  segment_id: string;
+  start_ms: number;
+  end_ms: number;
+  speaker_label: string | null;
+  text: string;
+};
+
+function splitMaterialTranscript(
+  transcript: ReadonlyArray<MaterialTranscriptSegment>,
+  maximumCharacters = 8_000
+): MaterialTranscriptSegment[][] {
+  const chunks: MaterialTranscriptSegment[][] = [];
+  let current: MaterialTranscriptSegment[] = [];
+  let currentCharacters = 0;
+  for (const segment of transcript) {
+    const characters = segment.text.length + 120;
+    if (current.length && currentCharacters + characters > maximumCharacters) {
+      chunks.push(current);
+      current = [];
+      currentCharacters = 0;
+    }
+    current.push(segment);
+    currentCharacters += characters;
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
+
+function normalizedStudyText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .toLocaleLowerCase("pt-BR")
+    .replace(/[^a-z0-9]+/gu, " ")
+    .trim();
+}
+
+function uniqueByText<T>(items: T[], value: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = normalizedStudyText(value(item));
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function safeMermaidLabel(value: string): string {
+  return value
+    .replace(/[<>()[\]{}:;#"`]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 100);
+}
+
+function mermaidFromMindmap(root: MindmapNodeContent): string {
+  const lines = [`mindmap`, `  root((${safeMermaidLabel(root.label) || "Aula"}))`];
+  const visit = (node: MindmapNodeContent, depth: number) => {
+    lines.push(`${"  ".repeat(depth)}${safeMermaidLabel(node.label) || "Tópico"}`);
+    node.children.forEach((child) => visit(child, depth + 1));
+  };
+  root.children.forEach((child) => visit(child, 2));
+  return lines.join("\n");
+}
+
+function combineMaterialParts(
+  materialType: GeneratableMaterial,
+  parts: unknown[],
+  classTitle: string
+): unknown {
+  if (materialType === "summary") {
+    const summaries = parts.map((part) => summaryContentSchema.parse(part));
+    return {
+      overview: summaries.map((item) => item.overview).join("\n\n"),
+      concepts: uniqueByText(
+        summaries.flatMap((item) => item.concepts),
+        (item) => item
+      ),
+      mechanisms: uniqueByText(
+        summaries.flatMap((item) => item.mechanisms),
+        (item) => item
+      ),
+      classifications: uniqueByText(
+        summaries.flatMap((item) => item.classifications),
+        (item) => item
+      ),
+      cause_and_effect: uniqueByText(
+        summaries.flatMap((item) => item.cause_and_effect),
+        (item) => item
+      ),
+      teacher_examples: uniqueByText(
+        summaries.flatMap((item) => item.teacher_examples),
+        (item) => item
+      ),
+      emphasized_points: uniqueByText(
+        summaries.flatMap((item) => item.emphasized_points),
+        (item) => item
+      ),
+      traps: uniqueByText(
+        summaries.flatMap((item) => item.traps),
+        (item) => item
+      ),
+      exam_items: uniqueByText(
+        summaries.flatMap((item) => item.exam_items),
+        (item) => item
+      ),
+      references: summaries.flatMap((item) => item.references)
+    };
+  }
+  if (materialType === "notes") {
+    const notes = parts.map((part) => notesContentSchema.parse(part));
+    const sections = uniqueByText(
+      notes.flatMap((item) => item.sections),
+      (item) => `${item.title} ${item.body.slice(0, 160)}`
+    ).sort((left, right) => left.timestamp_ms - right.timestamp_ms);
+    return {
+      title: notes[0]?.title || `Apostila — ${classTitle}`,
+      chronological_index: sections.map((section) => section.title),
+      sections,
+      teacher_examples: uniqueByText(
+        notes.flatMap((item) => item.teacher_examples),
+        (item) => item
+      ),
+      emphasized_points: uniqueByText(
+        notes.flatMap((item) => item.emphasized_points),
+        (item) => item
+      ),
+      remaining_questions: uniqueByText(
+        notes.flatMap((item) => item.remaining_questions),
+        (item) => item
+      )
+    };
+  }
+  if (materialType === "flashcards") {
+    const cards = uniqueByText(
+      parts.flatMap((part) => flashcardsContentSchema.parse(part).flashcards),
+      (item) => item.front
+    ).map((card, index) => ({ ...card, id: `fc_${index + 1}` }));
+    return { flashcards: cards };
+  }
+  if (materialType === "questions") {
+    const questions = uniqueByText(
+      parts.flatMap((part) => questionsContentSchema.parse(part).questions),
+      (item) => item.question
+    ).map((question, index) => ({ ...question, id: `q_${index + 1}` }));
+    return { questions };
+  }
+  const maps = parts.map((part) => mindmapContentSchema.parse(part));
+  const root = {
+    id: "root",
+    label: classTitle || maps[0]?.title || "Aula",
+    children: maps.flatMap((map, partIndex) =>
+      map.root.children.map((child, childIndex) => ({
+        ...child,
+        id: `topic_${partIndex + 1}_${childIndex + 1}`
+      }))
+    )
+  };
+  return {
+    title: `Mapa mental — ${classTitle}`,
+    root,
+    mermaid: mermaidFromMindmap(root)
+  };
+}
+
 function rejectLowQuality(message: string): never {
   throw new JobProcessingError("material_quality_insufficient", message, true, 1);
 }
@@ -658,6 +852,12 @@ function assertMaterialQuality(
     const minimum = Math.min(8_000, Math.max(250, Math.floor(transcriptCharacters * 0.06)));
     if (
       bodyCharacters < minimum ||
+      notes.sections.some(
+        (section) =>
+          /conte[uú]do\s+(?:a partir|apresentado|do trecho)|por volta de\s+\d{1,2}:\d{2}/iu.test(
+            section.title
+          ) || section.body.trim().split(/\s+/u).length < 35
+      ) ||
       (maximumTimestampMs > 600_000 &&
         Math.max(0, ...notes.sections.map((item) => item.timestamp_ms)) < maximumTimestampMs * 0.8)
     )
@@ -670,7 +870,12 @@ function assertMaterialQuality(
       (transcriptCharacters > 2_000 && cards.length < 10) ||
       (maximumTimestampMs > 600_000 &&
         Math.max(0, ...cards.map((item) => item.timestamp_ms)) < maximumTimestampMs * 0.8) ||
-      cards.some((card) => card.front.length < 8 || card.back.length < 25)
+      cards.some(
+        (card) =>
+          card.front.length < 12 ||
+          card.back.length < 35 ||
+          /conte[uú]do apresentado|por volta de|neste trecho|no [aá]udio/iu.test(card.front)
+      )
     )
       rejectLowQuality("Os flashcards ficaram incompletos. O próximo provedor será tentado.");
     return;
@@ -683,6 +888,11 @@ function assertMaterialQuality(
         Math.max(0, ...questions.map((item) => item.timestamp_ms)) < maximumTimestampMs * 0.8) ||
       questions.some(
         (question) =>
+          !question.question.includes("?") ||
+          question.question.length < 25 ||
+          /qual alternativa corresponde|conte[uú]do apresentado|por volta de|neste trecho|no [aá]udio/iu.test(
+            question.question
+          ) ||
           question.correct_explanation.length < 20 ||
           Object.keys(question.incorrect_explanations).length !== 4
       )
@@ -693,7 +903,18 @@ function assertMaterialQuality(
   const mindmap = mindmapContentSchema.parse(content);
   const countNodes = (node: typeof mindmap.root): number =>
     1 + node.children.reduce((total, child) => total + countNodes(child), 0);
-  if (transcriptCharacters > 2_000 && countNodes(mindmap.root) < 12)
+  const labels: string[] = [];
+  const collectLabels = (node: typeof mindmap.root) => {
+    labels.push(node.label);
+    node.children.forEach(collectLabels);
+  };
+  collectLabels(mindmap.root);
+  if (
+    (transcriptCharacters > 2_000 && countNodes(mindmap.root) < 12) ||
+    labels.some((label) =>
+      /conte[uú]do\s+(?:a partir|apresentado)|por volta de\s+\d{1,2}:\d{2}/iu.test(label)
+    )
+  )
     rejectLowQuality("O mapa mental ficou superficial. O próximo provedor será tentado.");
 }
 
@@ -761,28 +982,93 @@ export async function generateWithWorkersAi(
     mindmap:
       "Crie uma hierarquia profunda, clara e abrangente que represente todos os grandes assuntos, mecanismos, relações e exemplos da aula. O Mermaid é secundário; use somente mindmap, recuo com espaços e rótulos curtos sem caracteres de controle."
   };
-  const result = await runStructured(
-    env,
-    activeGenerationModel(env),
-    schema,
-    `Gere material de estudo em português usando exclusivamente a transcrição validada. Preserve timestamps em milissegundos e IDs de origem. Não use HTML. ${specificInstructions[materialType]}`,
-    { class: classContext, transcript },
-    materialType === "questions" || materialType === "mindmap",
-    materialType === "questions"
-      ? 14_000
-      : materialType === "flashcards"
-        ? 10_000
-        : materialType === "notes" || materialType === "summary"
-          ? 9000
-          : 8000,
-    env.CLOUDFLARE_GENERATION_MODEL,
-    20_000,
-    (candidate) => {
-      verifySourceReferences(candidate, allowedSegmentIds, maximumTimestampMs);
-      assertMaterialQuality(materialType, candidate, transcriptCharacters, maximumTimestampMs);
-    }
+  const transcriptParts = splitMaterialTranscript(transcript);
+  const minimumItemsPerPart = Math.max(3, Math.ceil(10 / transcriptParts.length));
+  const generatedParts: StructuredResult<unknown>[] = [];
+  for (const [partIndex, transcriptPart] of transcriptParts.entries()) {
+    const partStart = transcriptPart[0]?.start_ms ?? 0;
+    const partEnd = transcriptPart.at(-1)?.end_ms ?? maximumTimestampMs;
+    const partRequirement =
+      materialType === "questions"
+        ? `Nesta parte, crie pelo menos ${minimumItemsPerPart} questões conceituais completas. Cada enunciado precisa ter contexto próprio e terminar com uma pergunta; jamais use timestamp ou trecho transcrito como enunciado ou alternativa.`
+        : materialType === "flashcards"
+          ? `Nesta parte, crie pelo menos ${minimumItemsPerPart} flashcards conceituais autossuficientes. A frente deve nomear o conceito e fazer uma pergunta específica; nunca pergunte sobre "o conteúdo", "o trecho" ou o timestamp.`
+          : materialType === "notes"
+            ? "Transforme esta parte em capítulos didáticos com títulos temáticos reais e parágrafos explicativos. Sintetize a fala como material escrito; remova saudações, interrupções, repetições, comentários administrativos e vícios de linguagem. Não copie a transcrição como corpo e não use o horário como título."
+            : materialType === "mindmap"
+              ? "Extraia conceitos e relações desta parte. Use rótulos conceituais curtos, nunca frases da transcrição, timestamps ou nomes genéricos como conteúdo/tópico. Produza pelo menos três ramos temáticos quando houver conteúdo suficiente."
+              : "Resuma esta parte em afirmações completas, explicando conceitos e relações sem copiar blocos da transcrição.";
+    generatedParts.push(
+      await runStructured(
+        env,
+        activeGenerationModel(env),
+        schema,
+        `Gere material de estudo em português usando exclusivamente a transcrição validada. Você está processando a parte ${partIndex + 1} de ${transcriptParts.length}, entre ${formatTimestamp(partStart)} e ${formatTimestamp(partEnd)}. Preserve timestamps em milissegundos e IDs de origem. Não use HTML. ${specificInstructions[materialType]} ${partRequirement}`,
+        { class: classContext, transcript: transcriptPart },
+        materialType === "questions" || materialType === "mindmap",
+        materialType === "questions"
+          ? 8_000
+          : materialType === "flashcards"
+            ? 6_000
+            : materialType === "notes" || materialType === "summary"
+              ? 7_000
+              : 5_000,
+        env.CLOUDFLARE_GENERATION_MODEL,
+        35_000,
+        (candidate) => {
+          verifySourceReferences(candidate, allowedSegmentIds, maximumTimestampMs);
+          const partCharacters = transcriptPart.reduce(
+            (total, segment) => total + segment.text.length,
+            0
+          );
+          if (materialType === "flashcards") {
+            const cards = flashcardsContentSchema.parse(candidate).flashcards;
+            if (
+              cards.length < minimumItemsPerPart ||
+              cards.some(
+                (card) =>
+                  card.front.length < 12 ||
+                  card.back.length < 35 ||
+                  /conte[uú]do apresentado|por volta de|neste trecho|no [aá]udio/iu.test(card.front)
+              )
+            )
+              rejectLowQuality("Os flashcards desta parte ficaram genéricos ou incompletos.");
+          } else if (materialType === "questions") {
+            const questions = questionsContentSchema.parse(candidate).questions;
+            if (
+              questions.length < minimumItemsPerPart ||
+              questions.some(
+                (question) =>
+                  !question.question.includes("?") ||
+                  question.question.length < 25 ||
+                  /qual alternativa corresponde|conte[uú]do apresentado|por volta de|neste trecho|no [aá]udio/iu.test(
+                    question.question
+                  ) ||
+                  question.correct_explanation.length < 20
+              )
+            )
+              rejectLowQuality("As questões desta parte ficaram genéricas ou incompletas.");
+          } else {
+            assertMaterialQuality(materialType, candidate, partCharacters, partEnd);
+          }
+        }
+      )
+    );
+  }
+  const combined = combineMaterialParts(
+    materialType,
+    generatedParts.map((part) => part.data),
+    typeof classContext.title === "string" ? classContext.title : "Aula"
   );
-  return result;
+  verifySourceReferences(combined, allowedSegmentIds, maximumTimestampMs);
+  assertMaterialQuality(materialType, combined, transcriptCharacters, maximumTimestampMs);
+  return {
+    data: combined,
+    modelName: `ai-composed:${[...new Set(generatedParts.map((part) => part.modelName).filter(Boolean))].join("+")}`,
+    inputUnits: generatedParts.reduce((total, part) => total + (part.inputUnits ?? 0), 0),
+    outputUnits: generatedParts.reduce((total, part) => total + (part.outputUnits ?? 0), 0),
+    requestId: generatedParts.at(-1)?.requestId
+  };
 }
 
 export function markdownForMaterial(

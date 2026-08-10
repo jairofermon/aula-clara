@@ -11,6 +11,8 @@ type MaterialRow = {
   material_type: string;
   status: string;
   version: number;
+  prompt_version: string;
+  model_name: string;
 };
 
 async function findMaterialJob(context: ApiContext, materialId: string) {
@@ -77,7 +79,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const promptKey = type === "pdf" ? "notes" : type;
   const { data: existingRows } = await context.supabase
     .from("materials")
-    .select("id,material_type,version,status")
+    .select("id,material_type,version,status,prompt_version,model_name")
     .eq("class_id", id)
     .eq("user_id", context.user.id)
     .eq("material_type", type)
@@ -85,7 +87,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .limit(1);
   let material = existingRows?.[0] as MaterialRow | undefined;
 
-  if (material?.status === "completed") return Response.json({ data: material });
+  const expectedPromptVersion = PROMPT_VERSIONS[promptKey as keyof typeof PROMPT_VERSIONS];
+  const needsQualityRegeneration =
+    material?.status === "completed" &&
+    (material.prompt_version !== expectedPromptVersion ||
+      material.model_name.startsWith("extractive-"));
+
+  if (material?.status === "completed" && !needsQualityRegeneration)
+    return Response.json({ data: material });
 
   if (!material) {
     const { data: inserted, error } = await context.supabase
@@ -100,18 +109,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         prompt_version: PROMPT_VERSIONS[promptKey as keyof typeof PROMPT_VERSIONS],
         model_name: browserPdf ? "pdf-lib" : "provider-ranking"
       })
-      .select("id,material_type,status,version")
+      .select("id,material_type,status,version,prompt_version,model_name")
       .single();
     if (error || !inserted) return apiError("Não foi possível registrar o material único.", 500);
     material = inserted;
-  } else if (material.status === "failed") {
+  } else if (material.status === "failed" || needsQualityRegeneration) {
     const { error } = await context.supabase
       .from("materials")
       .update({
         status: "pending",
         error_message: null,
+        structured_content: {},
+        markdown_content: null,
+        model_name: browserPdf ? "pdf-lib" : "provider-ranking",
         source_transcript_version: klass.transcript_version,
-        prompt_version: PROMPT_VERSIONS[promptKey as keyof typeof PROMPT_VERSIONS]
+        prompt_version: expectedPromptVersion
       })
       .eq("id", material.id)
       .eq("user_id", context.user.id);

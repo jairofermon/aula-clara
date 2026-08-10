@@ -30,7 +30,7 @@ describe("roteamento entre provedores gratuitos", () => {
         { title: "Aula" }
       )
     ).rejects.toMatchObject({
-      code: "all_text_providers_failed",
+      code: expect.stringContaining("all_text_providers_failed:"),
       transient: true,
       retryDelaySeconds: expect.any(Number)
     } satisfies Partial<JobProcessingError>);
@@ -188,7 +188,7 @@ describe("roteamento entre provedores gratuitos", () => {
     );
 
     expect(result.data).toMatchObject({ overview: accepted.overview });
-    expect(result.modelName).toBe("@cf/meta/llama-3.1-8b-instruct-fast");
+    expect(result.modelName).toBe("ai-composed:@cf/meta/llama-3.1-8b-instruct-fast");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(cloudflareRun).toHaveBeenCalledTimes(1);
   });

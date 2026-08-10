@@ -108,9 +108,9 @@ Para materiais, cada segmento usa:
 
 A geração é liberada depois da revisão global. O resumo é automático e libera a aula para estudo; apostila, flashcards, questões e mapa mental entram em prioridade inferior para não atrasar a próxima aula.
 
-O resumo consulta todo o ranking de IA com timeout limitado por provedor. Se nenhuma resposta válida estiver disponível, o worker produz imediatamente um resumo extrativo distribuído por toda a transcrição validada, com referências e timestamps reais. Esse fallback mantém a aula utilizável e impede que o estado de 95% bloqueie a entrega; uma resposta de IA válida continua sendo sempre a opção prioritária.
+Todos os materiais de estudo são obrigatoriamente produzidos por IA. A transcrição é dividida em partes de tamanho seguro e cada parte percorre o ranking completo de provedores. As respostas estruturadas são consolidadas, desduplicadas e submetidas novamente às regras de qualidade e cobertura da aula inteira. Isso evita estouro de contexto sem substituir inteligência por cópia extrativa.
 
-A mesma garantia terminal vale para o pacote completo. Depois de consultar todo o ranking, o worker pode montar a apostila integral por blocos cronológicos, flashcards distribuídos pela duração, questões de associação temporal com cinco alternativas e explicações, e mapa mental hierárquico com Mermaid sanitizado. Esses fallbacks são validados pelos mesmos schemas dos materiais gerados por IA. Enquanto houver um material solicitado pendente, a API exibe progresso real entre 96% e 99% e informa quantos itens estão prontos; 100% é reservado ao pacote totalmente concluído.
+Apostila exige capítulos temáticos e proíbe horários como títulos; flashcards exigem perguntas conceituais autossuficientes; questões exigem enunciado contextualizado, cinco alternativas plausíveis e explicações; mapa mental exige rótulos conceituais e hierarquia. Materiais genéricos, transcrição disfarçada de apostila ou perguntas sobre “o trecho” são rejeitados. Se todos os provedores estiverem indisponíveis, o job permanece em retomada automática e nunca recebe o status falso de pronto. Enquanto houver material pendente, a API exibe progresso real entre 96% e 99%; 100% é reservado ao pacote validado.
 
 ## Capacidade e failover
 
