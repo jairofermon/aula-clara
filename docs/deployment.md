@@ -31,7 +31,7 @@ Consulte [ADR 0007](decisions/0007-free-cloud-deployment.md) antes de mudar a to
 - Ao atingir cota, o job fica em retry e a interface informa a indisponibilidade; a execução recomeça após a renovação.
 - As cotas são do provedor e podem mudar. Verifique-as no painel antes de uso intenso.
 
-O limite próprio do Aula Clara começa em 15 MB por áudio, abaixo do limite por arquivo do Supabase Free. Essa primeira implantação em nuvem trata o áudio como um único chunk e não executa FFmpeg.
+Áudios podem ter até 50 MB, o teto do Supabase Free. O navegador usa TUS em partes de 6 MB; uma falha de rede retoma o envio sem reiniciar o arquivo. Provedores que aceitam streaming recebem o objeto sem que o Worker o carregue inteiro na memória.
 
 ## Pré-requisitos
 
@@ -99,7 +99,7 @@ NEXT_PUBLIC_APP_URL=https://aula-clara.<subdominio>.workers.dev
 NEXT_PUBLIC_SUPABASE_URL=https://rctuenfnwlzmmpyjzhmq.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<chave-publicável>
 PROCESSING_DISPATCH_MODE=cloudflare
-MAX_AUDIO_UPLOAD_SIZE_MB=15
+MAX_AUDIO_UPLOAD_SIZE_MB=50
 MAX_MATERIAL_UPLOAD_SIZE_MB=50
 SIGNED_URL_TTL_SECONDS=300
 ```
@@ -182,7 +182,7 @@ Durante o primeiro smoke test, mantenha confirmação de e-mail conforme sua pre
 
 1. Cadastre um usuário e entre.
 2. Crie uma disciplina.
-3. Crie uma aula com WAV/MP3 pequeno, com fala clara e menos de 15 MB.
+3. Crie uma aula com WAV/MP3 com fala clara; valide também um arquivo acima de 15 MB.
 4. Confirme progresso de `queued` até transcrição/revisão.
 5. Abra a transcrição e clique em um timestamp.
 6. Edite ou confirme os trechos pendentes.

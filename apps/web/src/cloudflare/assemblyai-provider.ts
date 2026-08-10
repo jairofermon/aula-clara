@@ -146,7 +146,7 @@ function normalizedSegments(transcript: z.infer<typeof transcriptResponseSchema>
 
 export async function transcribeWithAssemblyAi(
   env: CloudflareEnv,
-  audio: ArrayBuffer,
+  audio: BodyInit | null,
   language: string,
   context: string,
   options: AssemblyAiOptions = {}
@@ -161,6 +161,12 @@ export async function transcribeWithAssemblyAi(
 
   let transcriptId = options.existingTranscriptId;
   if (!transcriptId) {
+    if (!audio)
+      throw new JobProcessingError(
+        "assemblyai_audio_missing",
+        "O áudio não pôde ser aberto para transcrição.",
+        true
+      );
     const uploaded = uploadResponseSchema.parse(
       await (
         await assemblyFetch(env, "/v2/upload", {

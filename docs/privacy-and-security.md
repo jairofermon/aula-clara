@@ -23,7 +23,8 @@ Gravações, slides e transcrições podem conter dados pessoais, educacionais o
 - RLS em todas as tabelas com dados de usuário; os grants habilitam operações, enquanto as policies restringem cada linha a `auth.uid()`.
 - FKs compostas garantem que aula, arquivo e job pertencem ao mesmo usuário.
 - As funções SQL de claim/lease não podem ser executadas por `anon` ou `authenticated`.
-- Buckets `class-audio`, `class-materials` e `generated-exports` são privados.
+- Os buckets Supabase `class-audio`, `class-materials` e `generated-exports` são privados.
+- Áudios usam nomes internos aleatórios e URLs assinadas de curta duração; o protocolo TUS autentica cada envio com a sessão do proprietário.
 - Paths começam por `user_id`; uploads e downloads usam URLs assinadas curtas.
 - Upload direto evita que arquivos grandes atravessem a memória do processo Next.js.
 - Nome interno usa UUID; nome original fica somente em metadados.

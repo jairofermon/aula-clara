@@ -89,7 +89,7 @@ NEXT_PUBLIC_APP_URL=https://aula-clara.<sua-conta>.workers.dev
 NEXT_PUBLIC_SUPABASE_URL=https://rctuenfnwlzmmpyjzhmq.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<chave pública do Supabase>
 PROCESSING_DISPATCH_MODE=cloudflare
-MAX_AUDIO_UPLOAD_SIZE_MB=15
+MAX_AUDIO_UPLOAD_SIZE_MB=50
 MAX_MATERIAL_UPLOAD_SIZE_MB=50
 SIGNED_URL_TTL_SECONDS=300
 ```
@@ -120,7 +120,7 @@ O roteiro completo, incluindo teste real e solução de erros, está em [docs/de
 
 ## Limites deliberados da publicação gratuita
 
-- áudio limitado a 15 MB para manter uma única chamada de transcrição no Worker gratuito;
+- áudio de até 50 MB no Supabase Storage gratuito, enviado pelo protocolo TUS em partes de 6 MB com retomada;
 - slides e materiais complementares limitados a 50 MB por arquivo, o teto do Supabase Free;
 - sem diarização: falante fica nulo quando o modelo não o identifica;
 - sem FFmpeg no Cloudflare nesta etapa; vídeos/áudios que exijam conversão devem ser convertidos antes do envio;
@@ -166,7 +166,7 @@ Nenhum teste comum chama API paga. Veja [docs/testing.md](docs/testing.md).
 | `SUPABASE_SERVICE_ROLE_KEY`     | segredo Cloudflare | Acesso exclusivo do consumidor às RPCs/Storage.   |
 | `PROCESSING_DISPATCH_MODE`      | web                | `cloudflare` na publicação; `postgres` local.     |
 | `CLOUDFLARE_*_MODEL`            | Worker             | Modelos centralizados do Workers AI.              |
-| `MAX_AUDIO_UPLOAD_SIZE_MB`      | web/Worker         | Limite funcional de áudio gratuito: 15 MB.        |
+| `MAX_AUDIO_UPLOAD_SIZE_MB`      | web/Worker         | Teto por arquivo do Supabase Free: 50 MB.         |
 | `MAX_MATERIAL_UPLOAD_SIZE_MB`   | web/Worker         | Limite do Supabase Free: 50 MB por material.      |
 | `SIGNED_URL_TTL_SECONDS`        | web                | Validade dos downloads privados.                  |
 | `OPENAI_API_KEY`                | Python opcional    | Nunca necessária no caminho gratuito.             |

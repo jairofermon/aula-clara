@@ -182,13 +182,27 @@ export class SupabaseJobRepository implements QueueRepository {
     });
   }
 
-  async downloadAudio(storagePath: string): Promise<ArrayBuffer> {
+  async openAudio(storageProvider: "supabase" | "r2", storagePath: string): Promise<Response> {
+    if (storageProvider !== "supabase") throw new Error("unsupported_audio_storage");
     const encodedPath = storagePath.split("/").map(encodeURIComponent).join("/");
-    const response = await this.request(
-      `/storage/v1/object/authenticated/class-audio/${encodedPath}`,
-      { method: "GET" }
+    const response = await fetch(
+      `${this.env.SUPABASE_URL}/storage/v1/object/authenticated/class-audio/${encodedPath}`,
+      {
+        headers: {
+          apikey: this.env.SUPABASE_SERVICE_ROLE_KEY,
+          authorization: `Bearer ${this.env.SUPABASE_SERVICE_ROLE_KEY}`
+        }
+      }
     );
-    return response.arrayBuffer();
+    if (!response.ok) throw new Error(`supabase_storage_${response.status}`);
+    return response;
+  }
+
+  async downloadAudio(
+    storageProvider: "supabase" | "r2",
+    storagePath: string
+  ): Promise<ArrayBuffer> {
+    return (await this.openAudio(storageProvider, storagePath)).arrayBuffer();
   }
 
   async saveProviderState(jobId: string, output: Record<string, unknown>): Promise<void> {

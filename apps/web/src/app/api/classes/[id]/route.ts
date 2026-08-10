@@ -64,7 +64,6 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     const { error } = await context.supabase.storage.from(bucket).remove(paths);
     if (error) return apiError("Não foi possível excluir os arquivos da aula.", 500);
   }
-
   await context.supabase.from("audit_events").insert({
     user_id: context.user.id,
     class_id: id,

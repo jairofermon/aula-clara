@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return validationError(parsed.error);
   const { data: file } = await context.supabase
     .from("class_files")
-    .select("id,class_id,file_type,storage_path,upload_completed")
+    .select("id,class_id,file_type,storage_path,storage_provider,upload_completed")
     .eq("id", parsed.data.file_id)
     .eq("user_id", context.user.id)
     .maybeSingle();
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     action: "file.uploaded",
     resource_type: "class_file",
     resource_id: file.id,
-    metadata: { file_type: file.file_type }
+    metadata: { file_type: file.file_type, storage_provider: file.storage_provider }
   });
   return Response.json({ data });
 }

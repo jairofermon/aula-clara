@@ -48,17 +48,57 @@ export async function POST(request: Request) {
       415,
       "invalid_file"
     );
+
   const bucket = input.file_type === "audio" ? "class-audio" : "class-materials";
   const safeExtension = extension || (input.file_type === "audio" ? ".bin" : ".pdf");
   const storagePath = `${context.user.id}/${input.class_id}/${randomUUID()}${safeExtension}`;
   const { data: file, error: insertError } = await context.supabase
     .from("class_files")
-    .insert({ ...input, user_id: context.user.id, storage_path: storagePath })
+    .insert({
+      ...input,
+      user_id: context.user.id,
+      storage_path: storagePath,
+      storage_provider: "supabase"
+    })
     .select("id")
     .single();
-  if (insertError?.code === "23505")
+  if (insertError?.code === "23505") {
+    const { data: existing } = await context.supabase
+      .from("class_files")
+      .select("id,storage_path,upload_completed")
+      .eq("class_id", input.class_id)
+      .eq("user_id", context.user.id)
+      .eq("sha256", input.sha256)
+      .eq("file_type", input.file_type)
+      .maybeSingle();
+    if (existing && !existing.upload_completed && input.file_type === "audio") {
+      return Response.json({
+        data: {
+          file_id: existing.id,
+          bucket,
+          storage_path: existing.storage_path,
+          upload_mode: "supabase_tus"
+        }
+      });
+    }
     return apiError("Este mesmo arquivo já foi registrado nesta aula.", 409, "duplicate_file");
+  }
   if (insertError || !file) return apiError("Não foi possível reservar o upload.", 500);
+
+  if (input.file_type === "audio") {
+    return Response.json(
+      {
+        data: {
+          file_id: file.id,
+          bucket,
+          storage_path: storagePath,
+          upload_mode: "supabase_tus"
+        }
+      },
+      { status: 201 }
+    );
+  }
+
   const { data: signed, error: signedError } = await context.supabase.storage
     .from(bucket)
     .createSignedUploadUrl(storagePath);
@@ -71,7 +111,15 @@ export async function POST(request: Request) {
     return apiError("Não foi possível autorizar o upload privado.", 500);
   }
   return Response.json(
-    { data: { file_id: file.id, bucket, storage_path: storagePath, signed_url: signed.signedUrl } },
+    {
+      data: {
+        file_id: file.id,
+        bucket,
+        storage_path: storagePath,
+        upload_mode: "supabase_signed",
+        signed_url: signed.signedUrl
+      }
+    },
     { status: 201 }
   );
 }

@@ -97,6 +97,9 @@ export const transcriptionInputSchema = z.union([
     .object({
       chunk_id: z.uuid(),
       storage_path: z.string().min(1),
+      storage_provider: z.enum(["supabase", "r2"]),
+      mime_type: z.string().min(1),
+      original_name: z.string().min(1),
       size_bytes: z.number().int().positive(),
       duration_ms: z.number().int().positive(),
       language: z.string().min(2).max(12),

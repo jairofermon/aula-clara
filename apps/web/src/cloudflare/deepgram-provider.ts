@@ -161,7 +161,7 @@ export function deepgramEnabled(env: CloudflareEnv): boolean {
 
 export async function transcribeWithDeepgram(
   env: CloudflareEnv,
-  audio: ArrayBuffer,
+  audio: BodyInit,
   filename: string,
   language: string
 ) {

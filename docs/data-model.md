@@ -21,7 +21,7 @@
 
 ### Arquivos e processamento
 
-- `class_files`: áudio, slides, complemento ou exportação; hash e metadados verificáveis.
+- `class_files`: áudio, slides, complemento ou exportação; hash e metadados verificáveis. `storage_provider` prepara uma troca futura de armazenamento; os campos multipart permanecem reservados para essa evolução.
 - `processing_jobs`: fila persistente, lease, tentativas, idempotência, entrada/saída e erro.
 - `audio_chunks`: janela global, path, hash, status e job de transcrição.
 

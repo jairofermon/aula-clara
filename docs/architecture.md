@@ -8,7 +8,8 @@ sem OpenAI API obrigatória:
 ```text
 Navegador → Next.js/OpenNext em Cloudflare Workers
    ├─ sessão e dados → Supabase Auth/PostgreSQL com RLS
-   ├─ upload direto assinado → Supabase Storage privado
+   ├─ áudio TUS retomável → Supabase Storage privado
+   ├─ PDFs assinados → Supabase Storage privado
    └─ comandos → processing_jobs → Cloudflare Queue
                                       └─ consumidor TypeScript
                                          ├─ Workers AI Whisper
@@ -33,7 +34,8 @@ A primeira vertical do Aula Clara transforma áudio de aula e materiais opcionai
 
 ```text
 Navegador
-  ├─ autenticação Supabase e upload direto para Storage privado
+  ├─ autenticação Supabase
+  ├─ áudio TUS e materiais para Supabase Storage privado
   └─ HTTPS → Next.js App Router
                  ├─ Server Components: leitura autenticada
                  ├─ Route Handlers: comandos, URLs assinadas e validação

@@ -54,9 +54,9 @@ O diretório temporário é sempre removido em `finally`.
 
 ### Deploy web gratuito inicial
 
-Para caber nos runtimes gratuitos sem servidor de mídia, a web limita o áudio a 15 MB e registra um único `audio_chunk` apontando para o objeto privado original. Duração é extraída no navegador e confirmada pelo pipeline. O processamento rejeita arquivo ausente, vazio, acima do limite ou sem duração válida.
+Na publicação web, o áudio original fica no Supabase Storage privado e é enviado por TUS em partes retomáveis de 6 MB. O limite do arquivo de origem (50 MB) é independente do limite de entrada direta de cada modelo. AssemblyAI e Deepgram recebem um stream novo do Storage; Groq, Workers AI e Gemini são tentados somente quando o arquivo cabe em seus limites seguros. Duração é extraída no navegador e confirmada pelo pipeline.
 
-Não há FFmpeg no Cloudflare nesta etapa. MP3/WAV/WebM/M4A compatível segue diretamente ao Workers AI; contêiner que exija conversão deve ser convertido antes do upload. Chunking longo, silêncio/overlap e extração de vídeo permanecem implementados no worker Python e são a expansão seguinte após medir cotas.
+Não há FFmpeg no Cloudflare nesta etapa. MP3/WAV/WebM/M4A compatível segue por streaming aos provedores de transcrição de arquivos longos; contêiner que exija conversão deve ser convertido antes do upload. Chunking por silêncio/overlap e extração de vídeo permanecem implementados no worker Python.
 
 ## Transcrição
 

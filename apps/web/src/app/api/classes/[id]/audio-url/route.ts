@@ -13,7 +13,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     .from("class_files")
     .select("storage_path,duration_ms")
     .eq("class_id", id)
-    .eq("user_id", context.user.id)
     .eq("file_type", "audio")
     .eq("upload_completed", true)
     .maybeSingle();

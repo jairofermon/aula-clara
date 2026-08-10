@@ -53,7 +53,7 @@ function rpcFailure(errorCode: string): never {
     audio_missing: ["O arquivo de áudio não foi encontrado.", false],
     invalid_source_file: ["A referência do áudio é inválida.", false],
     duration_missing: ["Não foi possível identificar a duração do áudio.", false],
-    audio_too_large: ["O áudio excede o limite de 15 MB da edição gratuita inicial.", false],
+    audio_too_large: ["O áudio excede o limite máximo configurado para esta instalação.", false],
     invalid_chunk: ["O bloco de áudio é inválido.", false],
     chunk_missing: ["O bloco de áudio não foi encontrado.", false],
     no_speech: ["Nenhuma fala foi identificada no áudio.", false],
@@ -273,16 +273,21 @@ const sourceJobInputSchema = z.object({ source_file_id: z.uuid() }).passthrough(
 const chunkJobInputSchema = z.object({ chunk_id: z.uuid() }).passthrough();
 
 class WorkersAiJobProcessor implements CloudJobProcessor {
-  private readonly maxAudioBytes: number;
+  private readonly maxSourceAudioBytes: number;
+  private readonly maxInlineAudioBytes: number;
 
   constructor(
     private readonly env: CloudflareEnv,
     private readonly repository: SupabaseJobRepository
   ) {
-    const maxMegabytes = Number(env.MAX_TRANSCRIPTION_CHUNK_MB);
-    if (!Number.isFinite(maxMegabytes) || maxMegabytes <= 0)
+    const maxSourceMegabytes = Number(env.MAX_AUDIO_UPLOAD_SIZE_MB || "50");
+    const maxInlineMegabytes = Number(env.MAX_TRANSCRIPTION_CHUNK_MB);
+    if (!Number.isFinite(maxSourceMegabytes) || maxSourceMegabytes <= 0)
+      throw new Error("MAX_AUDIO_UPLOAD_SIZE_MB inválido");
+    if (!Number.isFinite(maxInlineMegabytes) || maxInlineMegabytes <= 0)
       throw new Error("MAX_TRANSCRIPTION_CHUNK_MB inválido");
-    this.maxAudioBytes = Math.floor(maxMegabytes * 1024 * 1024);
+    this.maxSourceAudioBytes = Math.floor(maxSourceMegabytes * 1024 * 1024);
+    this.maxInlineAudioBytes = Math.floor(maxInlineMegabytes * 1024 * 1024);
   }
 
   async process(job: ProcessingJob) {
@@ -323,7 +328,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
   private async prepareAudio(job: ProcessingJob) {
     sourceJobInputSchema.parse(job.input_json);
     const parsed = prepareAudioResultSchema.parse(
-      await this.repository.prepareCloudAudio(job.id, this.maxAudioBytes)
+      await this.repository.prepareCloudAudio(job.id, this.maxSourceAudioBytes)
     );
     if ("error_code" in parsed) rpcFailure(parsed.error_code);
     return {
@@ -346,11 +351,15 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     let providerModel: string = this.env.CLOUDFLARE_TRANSCRIPTION_MODEL;
     let providerName = "cloudflare";
     if (!input.already_persisted) {
-      if (input.size_bytes > this.maxAudioBytes) rpcFailure("audio_too_large");
-      const audio = await this.repository.downloadAudio(input.storage_path);
-      if (audio.byteLength === 0)
-        throw new JobProcessingError("empty_audio", "O arquivo de áudio está vazio.", false);
-      if (audio.byteLength > this.maxAudioBytes) rpcFailure("audio_too_large");
+      if (input.size_bytes > this.maxSourceAudioBytes) rpcFailure("audio_too_large");
+      let audio: ArrayBuffer | undefined;
+      const bufferedAudio = async () => {
+        if (!audio)
+          audio = await this.repository.downloadAudio(input.storage_provider, input.storage_path);
+        if (audio.byteLength === 0)
+          throw new JobProcessingError("empty_audio", "O arquivo de áudio está vazio.", false);
+        return audio;
+      };
 
       const startedAt = Date.now();
       const accept = (response: unknown) => {
@@ -364,12 +373,17 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           ? job.output_json.assemblyai_transcript_id
           : undefined;
       const skipPrimaryProvider = job.input_json.skip_primary_provider === true;
-      if (!existingAssemblyTranscriptId && !skipPrimaryProvider && groqEnabled(this.env)) {
+      if (
+        input.size_bytes <= 24 * 1024 * 1024 &&
+        !existingAssemblyTranscriptId &&
+        !skipPrimaryProvider &&
+        groqEnabled(this.env)
+      ) {
         try {
-          const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
+          const filename = input.original_name;
           const result = await transcribeWithGroq(
             this.env,
-            audio,
+            await bufferedAudio(),
             filename,
             input.language,
             input.context
@@ -383,9 +397,12 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       }
       if (!segments.length && assemblyAiEnabled(this.env)) {
         try {
+          const source = existingAssemblyTranscriptId
+            ? null
+            : (await this.repository.openAudio(input.storage_provider, input.storage_path)).body;
           const result = await transcribeWithAssemblyAi(
             this.env,
-            audio,
+            source,
             input.language,
             input.context,
             {
@@ -408,8 +425,16 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       }
       if (!segments.length && deepgramEnabled(this.env)) {
         try {
-          const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
-          const result = await transcribeWithDeepgram(this.env, audio, filename, input.language);
+          const source = (
+            await this.repository.openAudio(input.storage_provider, input.storage_path)
+          ).body;
+          if (!source) throw new Error("audio_body_missing");
+          const result = await transcribeWithDeepgram(
+            this.env,
+            source,
+            input.original_name,
+            input.language
+          );
           segments = accept(result.data);
           providerModel = result.model;
           providerName = "deepgram";
@@ -418,10 +443,11 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           failure = failure ? soonerRetry(failure, deepgramFailure) : deepgramFailure;
         }
       }
-      if (!segments.length) {
+      if (!segments.length && input.size_bytes <= this.maxInlineAudioBytes) {
         try {
+          const inlineAudio = await bufferedAudio();
           const response = await this.env.AI.run(this.env.CLOUDFLARE_TRANSCRIPTION_MODEL, {
-            audio: Buffer.from(audio).toString("base64"),
+            audio: Buffer.from(inlineAudio).toString("base64"),
             task: "transcribe",
             language: input.language,
             vad_filter: true,
@@ -437,13 +463,16 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
           failure = failure ? soonerRetry(failure, cloudflareFailure) : cloudflareFailure;
         }
       }
-      if (!segments.length && geminiEnabled(this.env)) {
+      if (
+        !segments.length &&
+        input.size_bytes <= this.maxInlineAudioBytes &&
+        geminiEnabled(this.env)
+      ) {
         try {
-          const filename = input.storage_path.split("/").at(-1) ?? "audio.mp3";
           const result = await transcribeWithGemini(
             this.env,
-            audio,
-            filename,
+            await bufferedAudio(),
+            input.original_name,
             input.language,
             input.context
           );

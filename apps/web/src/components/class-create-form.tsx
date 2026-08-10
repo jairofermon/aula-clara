@@ -4,6 +4,10 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSHA256 } from "hash-wasm";
 import { CircleStop, UploadCloud } from "lucide-react";
+import { Upload } from "tus-js-client";
+import { getPublicEnv } from "@/lib/env";
+import { createClient } from "@/lib/supabase/client";
+import { supabaseTusEndpoint, TUS_CHUNK_SIZE_BYTES } from "@/lib/tus-upload";
 
 interface Subject {
   id: string;
@@ -87,6 +91,50 @@ function putWithProgress(
   });
 }
 
+async function putTusWithProgress(
+  file: File,
+  storagePath: string,
+  uploadRef: React.MutableRefObject<Upload | null>,
+  onProgress: (value: number) => void
+) {
+  const supabase = createClient();
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error("Entre novamente antes de enviar o áudio.");
+  const env = getPublicEnv();
+  await new Promise<void>((resolve, reject) => {
+    const upload = new Upload(file, {
+      endpoint: supabaseTusEndpoint(env.NEXT_PUBLIC_SUPABASE_URL),
+      retryDelays: [0, 1_000, 3_000, 5_000],
+      headers: {
+        authorization: `Bearer ${token}`,
+        apikey: env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        "x-upsert": "false"
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      chunkSize: TUS_CHUNK_SIZE_BYTES,
+      metadata: {
+        bucketName: "class-audio",
+        objectName: storagePath,
+        contentType: file.type || "application/octet-stream",
+        cacheControl: "3600"
+      },
+      onError: (error) => reject(error),
+      onProgress: (uploaded, total) => onProgress(Math.round((uploaded / total) * 100)),
+      onSuccess: () => resolve()
+    });
+    uploadRef.current = upload;
+    void upload
+      .findPreviousUploads()
+      .then((previous) => {
+        if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
+        upload.start();
+      })
+      .catch(reject);
+  });
+}
+
 export function ClassCreateForm({
   subjects,
   defaultSubject,
@@ -100,6 +148,7 @@ export function ClassCreateForm({
 }) {
   const router = useRouter();
   const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const tusRef = useRef<Upload | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [upload, setUpload] = useState<UploadState | null>(null);
@@ -127,23 +176,32 @@ export function ClassCreateForm({
       })
     });
     const startPayload = (await start.json()) as {
-      data?: { file_id: string; signed_url: string };
+      data?: {
+        file_id: string;
+        bucket: string;
+        storage_path: string;
+        upload_mode: "supabase_tus" | "supabase_signed";
+        signed_url?: string;
+      };
       error?: { message: string };
     };
     if (!start.ok || !startPayload.data)
       throw new Error(startPayload.error?.message ?? "Não foi possível iniciar o upload.");
-    setUpload({
-      name: file.name,
-      percent: 0,
-      stage: "Enviando diretamente ao armazenamento privado…"
-    });
-    await putWithProgress(startPayload.data.signed_url, file, xhrRef, (percent) =>
+    const updateProgress = (percent: number) =>
       setUpload({
         name: file.name,
         percent,
-        stage: "Enviando diretamente ao armazenamento privado…"
-      })
-    );
+        stage:
+          startPayload.data?.upload_mode === "supabase_tus"
+            ? "Enviando em partes retomáveis ao armazenamento privado…"
+            : "Enviando diretamente ao armazenamento privado…"
+      });
+    if (startPayload.data.upload_mode === "supabase_tus") {
+      await putTusWithProgress(file, startPayload.data.storage_path, tusRef, updateProgress);
+    } else {
+      if (!startPayload.data.signed_url) throw new Error("O armazenamento não autorizou o envio.");
+      await putWithProgress(startPayload.data.signed_url, file, xhrRef, updateProgress);
+    }
     const complete = await fetch("/api/uploads/complete", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -320,7 +378,8 @@ export function ClassCreateForm({
               accept=".m4a,.mp3,.wav,.mp4,.webm,audio/*,video/mp4,video/webm"
             />
             <span className="mt-2 block text-xs text-[#61736f]">
-              Limite gratuito: {Math.floor(maxAudioUploadBytes / 1024 / 1024)} MB.
+              Limite gratuito: {Math.floor(maxAudioUploadBytes / 1024 / 1024)} MB. Envios grandes
+              são retomados automaticamente se a conexão oscilar.
             </span>
           </label>
           <label>
@@ -367,7 +426,10 @@ export function ClassCreateForm({
             <button
               type="button"
               className="btn btn-secondary w-full"
-              onClick={() => xhrRef.current?.abort()}
+              onClick={() => {
+                xhrRef.current?.abort();
+                void tusRef.current?.abort(true);
+              }}
             >
               <CircleStop size={18} aria-hidden /> Cancelar upload
             </button>

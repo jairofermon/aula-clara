@@ -23,6 +23,9 @@ describe("processador gratuito", () => {
       transcriptionInput: vi.fn().mockResolvedValue({
         chunk_id: "00000000-0000-4000-8000-000000000004",
         storage_path: "user/class/audio.mp3",
+        storage_provider: "supabase",
+        mime_type: "audio/mpeg",
+        original_name: "audio.mp3",
         size_bytes: 100,
         duration_ms: 1_000,
         language: "pt",
