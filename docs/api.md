@@ -14,12 +14,12 @@ somente no servidor para operações do Supabase Auth.
 
 ## Disciplinas
 
-| Método   | Rota                | Corpo/resultado                     |
-| -------- | ------------------- | ----------------------------------- |
-| `GET`    | `/api/subjects`     | Lista disciplinas do usuário.       |
-| `POST`   | `/api/subjects`     | `{ name, description? }`; cria.     |
-| `PATCH`  | `/api/subjects/:id` | Altera nome/descrição.              |
-| `DELETE` | `/api/subjects/:id` | Exclui somente se não houver aulas. |
+| Método   | Rota                | Corpo/resultado                                      |
+| -------- | ------------------- | ---------------------------------------------------- |
+| `GET`    | `/api/subjects`     | Membro lista as próprias; administrador lista todas. |
+| `POST`   | `/api/subjects`     | `{ name, description? }`; cria.                      |
+| `PATCH`  | `/api/subjects/:id` | Altera nome/descrição.                               |
+| `DELETE` | `/api/subjects/:id` | Exclui somente se não houver aulas.                  |
 
 ## Aulas e processamento
 
@@ -47,9 +47,11 @@ somente no servidor para operações do Supabase Auth.
 }
 ```
 
-Cria path interno aleatório e retorna token/URL assinada. O navegador envia o arquivo diretamente ao Storage com `XMLHttpRequest`, permitindo progresso e cancelamento.
+Cria path interno aleatório. Áudio usa TUS diretamente no Storage, com partes de 6 MB, progresso, retry e retomada; PDF e complementos usam URL assinada.
 
 `POST /api/uploads/complete` recebe `{ file_id }`, confirma que o objeto existe e marca o registro. Duplicatas retornam conflito antes de criar job. PDF e complementos usam os mesmos endpoints com tipos permitidos.
+
+Administradores podem criar uma aula própria dentro de qualquer disciplina visível. A propriedade da aula continua sendo de quem a incluiu; membros só conseguem selecionar as próprias disciplinas.
 
 ## Transcrição
 

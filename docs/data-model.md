@@ -51,6 +51,8 @@ classes 1──N materials
 processing_jobs 1──N usage_records
 ```
 
+`classes.user_id` identifica quem incluiu a aula e é independente do proprietário de `subjects`. A interface só oferece disciplinas próprias para membros; administradores podem organizar aulas em qualquer disciplina, conforme RLS.
+
 ## Constraints essenciais
 
 - `classes.progress`, `processing_jobs.progress` entre 0 e 100.

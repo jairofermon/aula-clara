@@ -23,6 +23,12 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   const context = await getApiContext();
   if (!context) return apiError("Entre novamente.", 401, "unauthorized");
   const { id } = await params;
+  const { data: subject } = await context.supabase
+    .from("subjects")
+    .select("id,name,user_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!subject) return apiError("Disciplina não encontrada.", 404, "not_found");
   const { count } = await context.supabase
     .from("classes")
     .select("id", { count: "exact", head: true })
@@ -35,7 +41,13 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       "not_empty"
     );
   const { error } = await context.supabase.from("subjects").delete().eq("id", id);
-  return error
-    ? apiError("Não foi possível excluir a disciplina.", 500)
-    : new Response(null, { status: 204 });
+  if (error) return apiError("Não foi possível excluir a disciplina.", 500);
+  await context.supabase.from("audit_events").insert({
+    user_id: context.user.id,
+    action: "subject.deleted",
+    resource_type: "subject",
+    resource_id: subject.id,
+    metadata: { name: subject.name, owner_user_id: subject.user_id }
+  });
+  return new Response(null, { status: 204 });
 }

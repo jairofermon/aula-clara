@@ -10,11 +10,14 @@ export default async function NewClassPage({
 }) {
   const user = await requireUser();
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("subjects")
-    .select("id,name")
-    .eq("user_id", user.id)
-    .order("name");
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  let subjectsQuery = supabase.from("subjects").select("id,name").order("name");
+  if (profile?.role !== "admin") subjectsQuery = subjectsQuery.eq("user_id", user.id);
+  const { data } = await subjectsQuery;
   const query = await searchParams;
   const { maxAudioUploadBytes, maxMaterialUploadBytes } = getServerEnv();
   return (

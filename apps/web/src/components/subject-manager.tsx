@@ -94,7 +94,7 @@ export function SubjectManager({ initialSubjects }: { initialSubjects: Subject[]
               aria-label={`Excluir ${subject.name}`}
               onClick={() => void remove(subject)}
             >
-              <Trash2 size={17} aria-hidden />
+              <Trash2 size={17} aria-hidden /> Excluir
             </button>
           </article>
         ))}

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ClassStatus } from "@aula-clara/shared";
 import { STATUS_LABELS, statusTone } from "@/lib/status";
 import { ClassDeleteButton } from "@/components/class-delete-button";
+import { SubjectDeleteButton } from "@/components/subject-delete-button";
 
 export default async function SubjectPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -40,9 +41,17 @@ export default async function SubjectPage({ params }: { params: Promise<{ id: st
           <h1 className="mt-1 text-4xl font-black">{subject.name}</h1>
           <p className="mt-2 text-[#61736f]">{subject.description}</p>
         </div>
-        <Link className="btn btn-primary" href={`/classes/new?subject=${subject.id}`}>
-          Nova aula
-        </Link>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Link className="btn btn-primary" href={`/classes/new?subject=${subject.id}`}>
+            Nova aula
+          </Link>
+          <SubjectDeleteButton
+            subjectId={subject.id}
+            name={subject.name}
+            classCount={classes?.length ?? 0}
+            redirectTo="/dashboard"
+          />
+        </div>
       </div>
       <div className="mt-8 space-y-3">
         {(classes ?? []).map((item) => {
