@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:cloudflare": "opennextjs-cloudflare build",
-    "preview:cloudflare": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy:cloudflare": "opennextjs-cloudflare build && opennextjs-cloudflare deploy -- --secrets-file .secrets.production",
+    "build:cloudflare": "opennextjs-cloudflare build && node ../../scripts/patch-open-next-cloudflare.mjs",
+    "preview:cloudflare": "pnpm build:cloudflare && opennextjs-cloudflare preview",
+    "deploy:cloudflare": "pnpm build:cloudflare && opennextjs-cloudflare deploy",
     "cf:types": "wrangler types --env-interface CloudflareEnv",
     "start": "next start",
     "lint": "eslint .",

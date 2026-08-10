@@ -254,7 +254,9 @@ export class SupabaseJobRepository implements QueueRepository {
   async readyJobIds(limit = 20): Promise<string[]> {
     const query = new URLSearchParams({
       select: "id",
-      status: "in.(pending,retry_wait,running)",
+      // Jobs em execução pertencem a uma entrega ativa da fila. Consultá-los
+      // aqui faria o cron girar sobre o mesmo lock e desperdiçar capacidade.
+      status: "in.(pending,retry_wait)",
       next_attempt_at: `lte.${new Date().toISOString()}`,
       order: "priority.desc,next_attempt_at.asc,created_at.asc",
       limit: String(limit)

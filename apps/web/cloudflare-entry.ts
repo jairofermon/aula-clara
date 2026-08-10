@@ -4,6 +4,7 @@ import nextHandler from "./.open-next/worker.js";
 import { createCloudJobProcessor } from "./src/cloudflare/cloud-job-processor";
 import type { ProcessingQueueMessage } from "./src/cloudflare/contracts";
 import { consumeDelivery } from "./src/cloudflare/queue-consumer";
+import { processScheduledJobs } from "./src/cloudflare/scheduled-processor";
 import { SupabaseJobRepository } from "./src/cloudflare/supabase-job-repository";
 
 export default {
@@ -20,9 +21,9 @@ export default {
         message,
         repository,
         processor,
-        async (jobId, options) => {
-          await env.PROCESSING_QUEUE.send({ job_id: jobId }, options);
-        }
+        // A continuação fica persistida no PostgreSQL. O cron abaixo a retoma
+        // sem gastar uma nova operação da fila a cada lote de IA.
+        async () => undefined
       );
       console.log(
         JSON.stringify({
@@ -36,10 +37,10 @@ export default {
 
   async scheduled(_controller: ScheduledController, env: CloudflareEnv) {
     const repository = new SupabaseJobRepository(env);
-    const jobIds = await repository.readyJobIds();
-    if (jobIds.length) {
-      await env.PROCESSING_QUEUE.sendBatch(jobIds.map((jobId) => ({ body: { job_id: jobId } })));
-    }
-    console.log(JSON.stringify({ event: "processing_queue.sweep", queued_jobs: jobIds.length }));
+    const processor = createCloudJobProcessor(env, repository);
+    const processedJobs = await processScheduledJobs(repository, processor, 3);
+    console.log(
+      JSON.stringify({ event: "processing_scheduler.sweep", processed_jobs: processedJobs })
+    );
   }
 } satisfies ExportedHandler<CloudflareEnv, ProcessingQueueMessage>;
