@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { JobProcessingError } from "./contracts";
 import { generateWithWorkersAi, reviewWithWorkersAi } from "./workers-ai-content";
 
 function cloudflareEnv(response: unknown): CloudflareEnv {
@@ -237,7 +238,7 @@ describe("conteúdo estruturado do Workers AI", () => {
     });
   });
 
-  it("não marca texto bruto como revisado quando nenhum provedor entrega correção válida", async () => {
+  it("preserva o original sem bloquear a aula quando todos os provedores recusam um trecho", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(new Response("solicitação recusada", { status: 400 }))
@@ -258,10 +259,16 @@ describe("conteúdo estruturado do Workers AI", () => {
         ],
         "contexto"
       )
-    ).rejects.toMatchObject({
-      code: "invalid_provider_schema",
-      transient: true,
-      retryDelaySeconds: 5
+    ).resolves.toMatchObject({
+      modelName: "original-preserved-after-provider-failover",
+      data: {
+        segments: [
+          expect.objectContaining({
+            revised_text: "texto ainda não revisado",
+            confidence: 0.5
+          })
+        ]
+      }
     });
   });
 
@@ -332,6 +339,35 @@ describe("conteúdo estruturado do Workers AI", () => {
         ]
       }
     });
+  });
+
+  it("divide internamente um segmento longo que o provedor não aceita como lote", async () => {
+    const env = cloudflareEnv(null);
+    const original = `${"Primeira frase extensa para revisão. ".repeat(38)}${"Segunda parte da explicação. ".repeat(20)}`;
+    vi.mocked(env.AI.run)
+      .mockRejectedValueOnce(new JobProcessingError("groq_request_too_large", "grande", true, 5))
+      .mockImplementation(async (_model, input) => {
+        const message = (input as { messages: Array<{ content: string }> }).messages.at(
+          -1
+        )?.content;
+        return { response: message?.split("Transcrição: ").at(-1) ?? "" };
+      });
+
+    const result = await reviewWithWorkersAi(
+      env,
+      [
+        {
+          segment_id: "00000000-0000-4000-8000-000000000001",
+          raw_text: original,
+          start_ms: 0,
+          end_ms: 1000
+        }
+      ],
+      "contexto"
+    );
+
+    expect(result.data.segments[0]?.revised_text.length).toBeGreaterThan(1200);
+    expect(env.AI.run).toHaveBeenCalledTimes(3);
   });
 
   it("rejeita material que cita segmento inexistente", async () => {

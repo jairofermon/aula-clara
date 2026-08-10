@@ -50,23 +50,13 @@ describe("processador gratuito", () => {
     expect(result.output.resumed).toBe(true);
   });
 
-  it("divide o lote quando a IA devolve resposta inconsistente", async () => {
+  it("preserva e conclui o lote quando a IA devolve resposta inconsistente", async () => {
     const firstId = "00000000-0000-4000-8000-000000000010";
     const secondId = "00000000-0000-4000-8000-000000000011";
-    const reviewed = (index: number) => ({
-      index,
-      revised_text: "Texto revisado.",
-      confidence: 0.95
-    });
-    const run = vi
-      .fn()
-      .mockResolvedValueOnce({ response: "resposta que não é JSON" })
-      .mockResolvedValueOnce({ response: { segments: [reviewed(0)] } })
-      .mockResolvedValueOnce({ response: { segments: [reviewed(0)] } });
+    const run = vi.fn().mockResolvedValue({ response: "resposta que não é JSON" });
     const applyReviewBatch = vi
       .fn()
-      .mockResolvedValueOnce({ applied: 1, remaining: 1, needs_review: 0 })
-      .mockResolvedValueOnce({ applied: 1, remaining: 0, needs_review: 0 });
+      .mockResolvedValue({ applied: 2, remaining: 0, needs_review: 0 });
     const repository = {
       reviewBatch: vi.fn().mockResolvedValue({
         context: "Aula de teste",
@@ -86,24 +76,65 @@ describe("processador gratuito", () => {
 
     const result = await createCloudJobProcessor(env, repository).process(reviewJob);
 
-    expect(run).toHaveBeenCalledTimes(3);
-    expect(repository.reviewBatch).toHaveBeenCalledWith(job.id, 40);
-    expect(applyReviewBatch).toHaveBeenCalledTimes(2);
-    expect(applyReviewBatch).toHaveBeenNthCalledWith(
-      1,
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(repository.reviewBatch).toHaveBeenCalledWith(job.id, 16);
+    expect(applyReviewBatch).toHaveBeenCalledTimes(1);
+    expect(applyReviewBatch).toHaveBeenCalledWith(
       job.id,
-      [expect.objectContaining({ segment_id: firstId })],
-      expect.any(String),
-      expect.any(Object)
-    );
-    expect(applyReviewBatch).toHaveBeenNthCalledWith(
-      2,
-      job.id,
-      [expect.objectContaining({ segment_id: secondId })],
-      expect.any(String),
+      [
+        expect.objectContaining({ segment_id: firstId, revised_text: "Primeiro." }),
+        expect.objectContaining({ segment_id: secondId, revised_text: "Segundo." })
+      ],
+      "original-preserved-after-provider-failover",
       expect.any(Object)
     );
     expect(result.output).toMatchObject({ reviewed: 2, needs_review: 0 });
+  });
+
+  it("persiste o lote preservado quando todos os provedores estão indisponíveis", async () => {
+    const firstId = "00000000-0000-4000-8000-000000000010";
+    const secondId = "00000000-0000-4000-8000-000000000011";
+    const applyReviewBatch = vi.fn().mockResolvedValue({
+      applied: 2,
+      remaining: 0,
+      needs_review: 0,
+      next_job_id: "00000000-0000-4000-8000-000000000012"
+    });
+    const repository = {
+      reviewBatch: vi.fn().mockResolvedValue({
+        context: "Aula de teste",
+        segments: [
+          { segment_id: firstId, raw_text: "Primeiro.", start_ms: 0, end_ms: 1000 },
+          { segment_id: secondId, raw_text: "Segundo.", start_ms: 1000, end_ms: 2000 }
+        ]
+      }),
+      applyReviewBatch
+    } as unknown as SupabaseJobRepository;
+    const env = {
+      AI: {
+        run: vi.fn().mockRejectedValue(new Error("3036 daily free allocation")),
+        aiGatewayLogId: null
+      },
+      CLOUDFLARE_REVIEW_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      MAX_TRANSCRIPTION_CHUNK_MB: "15"
+    } as unknown as CloudflareEnv;
+
+    const result = await createCloudJobProcessor(env, repository).process({
+      ...job,
+      job_type: "review_transcript"
+    });
+
+    expect(applyReviewBatch).toHaveBeenCalledWith(
+      job.id,
+      [
+        expect.objectContaining({ segment_id: firstId, revised_text: "Primeiro." }),
+        expect.objectContaining({ segment_id: secondId, revised_text: "Segundo." })
+      ],
+      "original-preserved-after-provider-failover",
+      expect.any(Object)
+    );
+    expect(result.output).toMatchObject({ reviewed: 2, needs_review: 0 });
+    expect(result.nextJobIds).toEqual(["00000000-0000-4000-8000-000000000012"]);
   });
 
   it("não bloqueia a entrega quando todos os provedores falham na segunda revisão", async () => {
@@ -157,5 +188,65 @@ describe("processador gratuito", () => {
       transcript_validated: true
     });
     expect(result.nextJobIds).toEqual([summaryJobId]);
+  });
+
+  it("conclui o resumo com extração da transcrição quando todo o ranking falha", async () => {
+    const materialId = "00000000-0000-4000-8000-000000000030";
+    const finishMaterial = vi.fn().mockResolvedValue({ material_id: materialId, completed: true });
+    const repository = {
+      materialInput: vi.fn().mockResolvedValue({
+        material_id: materialId,
+        material_type: "summary",
+        source_transcript_version: 3,
+        already_completed: false,
+        class_context: {
+          title: "Aula de teste",
+          topic: "Tema",
+          teacher_name: null,
+          class_date: "2026-08-09",
+          language: "pt",
+          subject_name: "Disciplina"
+        },
+        transcript: [
+          {
+            segment_id: "00000000-0000-4000-8000-000000000010",
+            start_ms: 0,
+            end_ms: 1000,
+            speaker_label: null,
+            text: "Explicação inicial completa da aula."
+          },
+          {
+            segment_id: "00000000-0000-4000-8000-000000000011",
+            start_ms: 1000,
+            end_ms: 2000,
+            speaker_label: null,
+            text: "Conclusão e pontos importantes da aula."
+          }
+        ]
+      }),
+      finishMaterial
+    } as unknown as SupabaseJobRepository;
+    const env = {
+      AI: { run: vi.fn().mockResolvedValue({ response: "inválido" }), aiGatewayLogId: null },
+      CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      MAX_TRANSCRIPTION_CHUNK_MB: "15"
+    } as unknown as CloudflareEnv;
+
+    const result = await createCloudJobProcessor(env, repository).process({
+      ...job,
+      job_type: "generate_summary"
+    });
+
+    expect(finishMaterial).toHaveBeenCalledWith(
+      job.id,
+      expect.objectContaining({
+        overview: expect.stringContaining("Explicação inicial"),
+        references: expect.arrayContaining([expect.objectContaining({ timestamp_ms: 0 })])
+      }),
+      expect.any(String),
+      "extractive-summary-after-provider-failover",
+      expect.any(Object)
+    );
+    expect(result.output).toMatchObject({ material_id: materialId, material_type: "summary" });
   });
 });

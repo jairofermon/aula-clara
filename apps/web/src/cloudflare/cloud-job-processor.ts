@@ -72,6 +72,42 @@ function rpcFailure(errorCode: string): never {
   throw new JobProcessingError(errorCode, message, transient);
 }
 
+function extractiveSummaryFallback(
+  transcript: Array<{
+    segment_id: string;
+    start_ms: number;
+    end_ms: number;
+    speaker_label: string | null;
+    text: string;
+  }>
+) {
+  const sampleCount = Math.min(12, transcript.length);
+  const sampled = Array.from({ length: sampleCount }, (_, index) => {
+    const position =
+      sampleCount === 1 ? 0 : Math.round((index * (transcript.length - 1)) / (sampleCount - 1));
+    return transcript[position]!;
+  });
+  const excerpts = sampled.map((segment) => {
+    const text = segment.text.replace(/\s+/gu, " ").trim();
+    return text.length > 320 ? `${text.slice(0, 317).trim()}...` : text;
+  });
+  return {
+    overview: excerpts.slice(0, 4).join(" "),
+    concepts: excerpts,
+    mechanisms: [],
+    classifications: [],
+    cause_and_effect: [],
+    teacher_examples: [],
+    emphasized_points: excerpts.slice(0, 8),
+    traps: [],
+    exam_items: excerpts.slice(0, 6),
+    references: sampled.map((segment) => ({
+      timestamp_ms: segment.start_ms,
+      source_segment_ids: [segment.segment_id]
+    }))
+  };
+}
+
 type ReviewSegmentInput = {
   segment_id: string;
   raw_text: string;
@@ -374,7 +410,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
         await this.repository.applyReviewBatch(
           job.id,
           result.data.segments.map((segment) => ({ ...segment })),
-          activeSegmentReviewModel(this.env),
+          result.modelName ?? activeSegmentReviewModel(this.env),
           {
             durationMs: Date.now() - startedAt,
             inputUnits: result.inputUnits,
@@ -386,27 +422,33 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       if ("error_code" in applied) rpcFailure(applied.error_code);
       return applied;
     } catch (error) {
-      const canSplit =
+      const preserveAndContinue =
         error instanceof JobProcessingError &&
         [
+          "all_text_providers_failed",
           "review_segment_ids_mismatch",
           "invalid_provider_json",
           "invalid_provider_schema",
           "groq_request_too_large",
           "groq_invalid_request"
         ].includes(error.code);
-      if (!canSplit || segments.length === 1) {
-        throw error;
+      if (preserveAndContinue) {
+        const preserved = applyReviewResultSchema.parse(
+          await this.repository.applyReviewBatch(
+            job.id,
+            segments.map((segment) => ({
+              segment_id: segment.segment_id,
+              revised_text: segment.raw_text,
+              confidence: 0.5
+            })),
+            "original-preserved-after-provider-failover",
+            { durationMs: Date.now() - startedAt }
+          )
+        );
+        if ("error_code" in preserved) rpcFailure(preserved.error_code);
+        return preserved;
       }
-      const middle = Math.ceil(segments.length / 2);
-      const first = await this.applyReviewSegments(job, segments.slice(0, middle), context);
-      const second = await this.applyReviewSegments(job, segments.slice(middle), context);
-      return {
-        applied: first.applied + second.applied,
-        remaining: second.remaining,
-        needs_review: second.needs_review,
-        next_job_id: second.next_job_id
-      };
+      throw error;
     }
   }
 
@@ -415,7 +457,7 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     let reviewed = 0;
     let needsReview = 0;
     for (let batchNumber = 0; batchNumber < 10; batchNumber += 1) {
-      const input = reviewInputSchema.parse(await this.repository.reviewBatch(job.id, 40));
+      const input = reviewInputSchema.parse(await this.repository.reviewBatch(job.id, 16));
       if ("error_code" in input) rpcFailure(input.error_code);
       if (!input.segments.length) {
         return { output: { reviewed, needs_review: needsReview, resumed: reviewed === 0 } };
@@ -495,12 +537,21 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     if (input.material_type !== materialType) rpcFailure("invalid_material");
 
     const startedAt = Date.now();
-    const generated = await generateWithWorkersAi(
-      this.env,
-      materialType,
-      input.transcript,
-      input.class_context
-    );
+    let generated: Awaited<ReturnType<typeof generateWithWorkersAi>>;
+    try {
+      generated = await generateWithWorkersAi(
+        this.env,
+        materialType,
+        input.transcript,
+        input.class_context
+      );
+    } catch (error) {
+      if (!(error instanceof JobProcessingError) || materialType !== "summary") throw error;
+      generated = {
+        data: extractiveSummaryFallback(input.transcript),
+        modelName: "extractive-summary-after-provider-failover"
+      };
+    }
     const structuredContent = generated.data as Record<string, unknown>;
     const finished = finishMaterialResultSchema.parse(
       await this.repository.finishMaterial(

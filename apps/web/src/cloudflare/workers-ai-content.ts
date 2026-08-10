@@ -348,7 +348,10 @@ async function reviewSingleAsPlainText(
   const failures: JobProcessingError[] = [];
   if (groqEnabled(env)) {
     try {
-      const result = await chatWithGroq(env, model, messages, undefined, 3000);
+      const result = await withProviderTimeout(
+        chatWithGroq(env, model, messages, undefined, 3000),
+        8_000
+      );
       return validate(result.response, result);
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
@@ -356,45 +359,120 @@ async function reviewSingleAsPlainText(
   }
   if (geminiEnabled(env)) {
     try {
-      const result = await chatWithGemini(env, messages, 3000);
+      const result = await withProviderTimeout(chatWithGemini(env, messages, 3000), 8_000);
       return validate(result.response, result);
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
   }
   try {
-    const raw = await env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
-      messages,
-      temperature: 0.1,
-      max_tokens: 3000
-    });
+    const raw = await withProviderTimeout(
+      Promise.resolve(
+        env.AI.run(env.CLOUDFLARE_REVIEW_MODEL, {
+          messages,
+          temperature: 0.1,
+          max_tokens: 3000
+        })
+      ),
+      8_000
+    );
     return validate(raw, { requestId: env.AI.aiGatewayLogId ?? undefined });
   } catch (error) {
     failures.push(classifyWorkersAiError(error));
   }
   if (openRouterEnabled(env)) {
     try {
-      const result = await chatWithOpenRouter(env, messages, 3000);
+      const result = await withProviderTimeout(chatWithOpenRouter(env, messages, 3000), 8_000);
       return validate(result.response, result);
     } catch (error) {
       failures.push(classifyWorkersAiError(error));
     }
   }
-  const schemaFailure = failures.find((failure) =>
-    ["invalid_provider_json", "invalid_provider_schema", "groq_request_too_large"].includes(
-      failure.code
+  // A revisão global ainda fará uma segunda leitura. Um único trecho problemático
+  // não pode manter a aula inteira presa em um ciclo sem progresso.
+  return {
+    data: {
+      segments: [
+        {
+          segment_id: segment.segment_id,
+          revised_text: segment.raw_text,
+          confidence: 0.5
+        }
+      ]
+    },
+    modelName: "original-preserved-after-provider-failover"
+  };
+}
+
+function splitLongReviewText(text: string, maximumCharacters = 1200): string[] {
+  const remaining = text.trim();
+  if (remaining.length <= maximumCharacters) return [remaining];
+  const pieces: string[] = [];
+  let cursor = remaining;
+  while (cursor.length > maximumCharacters) {
+    const window = cursor.slice(0, maximumCharacters + 1);
+    const sentenceBreak = Math.max(
+      window.lastIndexOf(". "),
+      window.lastIndexOf("? "),
+      window.lastIndexOf("! ")
+    );
+    const wordBreak = window.lastIndexOf(" ");
+    const cut = sentenceBreak >= maximumCharacters * 0.55 ? sentenceBreak + 1 : wordBreak;
+    const safeCut = cut > 0 ? cut : maximumCharacters;
+    pieces.push(cursor.slice(0, safeCut).trim());
+    cursor = cursor.slice(safeCut).trim();
+  }
+  if (cursor) pieces.push(cursor);
+  return pieces.filter(Boolean);
+}
+
+async function reviewLongSegmentAsPlainText(
+  env: CloudflareEnv,
+  segment: {
+    segment_id: string;
+    raw_text: string;
+    start_ms: number;
+    end_ms: number;
+  },
+  context: string,
+  model: string
+) {
+  const pieces = splitLongReviewText(segment.raw_text);
+  const results = [];
+  for (const rawText of pieces) {
+    results.push(
+      await reviewSingleAsPlainText(
+        env,
+        { ...segment, raw_text: rawText },
+        context.slice(0, 1000),
+        model
+      )
+    );
+  }
+  return {
+    data: {
+      segments: [
+        {
+          segment_id: segment.segment_id,
+          revised_text: results
+            .map((result) => result.data.segments[0]?.revised_text ?? "")
+            .filter(Boolean)
+            .join(" "),
+          confidence: Math.min(
+            ...results.map((result) => result.data.segments[0]?.confidence ?? 0.5)
+          )
+        }
+      ]
+    },
+    modelName: results.every(
+      (result) => result.modelName === "original-preserved-after-provider-failover"
     )
-  );
-  if (schemaFailure) throw schemaFailure;
-  const nextRetry = failures
-    .slice(1)
-    .reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
-  throw new JobProcessingError(
-    "all_text_providers_failed",
-    "Todos os provedores de IA disponíveis foram consultados. O sistema continuará alternando automaticamente até concluir.",
-    true,
-    Math.max(15, Math.min(nextRetry.retryDelaySeconds ?? 15, 60))
-  );
+      ? "original-preserved-after-provider-failover"
+      : model,
+    inputUnits: results.reduce((total, result) => total + (result.inputUnits ?? 0), 0),
+    outputUnits: results.reduce((total, result) => total + (result.outputUnits ?? 0), 0),
+    requestId: undefined
+  };
 }
 
 export async function reviewWithWorkersAi(
@@ -426,16 +504,20 @@ export async function reviewWithWorkersAi(
       },
       false,
       6000,
-      env.CLOUDFLARE_REVIEW_MODEL
+      env.CLOUDFLARE_REVIEW_MODEL,
+      8_000
     );
   } catch (error) {
     const recoverableReviewError =
       error instanceof JobProcessingError &&
-      ["invalid_provider_json", "invalid_provider_schema", "groq_invalid_request"].includes(
-        error.code
-      );
+      [
+        "invalid_provider_json",
+        "invalid_provider_schema",
+        "groq_request_too_large",
+        "groq_invalid_request"
+      ].includes(error.code);
     if (recoverableReviewError && segments.length === 1) {
-      return reviewSingleAsPlainText(env, segments[0]!, context, model);
+      return reviewLongSegmentAsPlainText(env, segments[0]!, context, model);
     }
     throw error;
   }
@@ -694,7 +776,7 @@ export async function generateWithWorkersAi(
           ? 9000
           : 8000,
     env.CLOUDFLARE_GENERATION_MODEL,
-    45_000,
+    20_000,
     (candidate) => {
       verifySourceReferences(candidate, allowedSegmentIds, maximumTimestampMs);
       assertMaterialQuality(materialType, candidate, transcriptCharacters, maximumTimestampMs);

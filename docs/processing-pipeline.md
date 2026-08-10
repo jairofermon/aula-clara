@@ -88,7 +88,7 @@ Título, disciplina, professor, glossário e texto extraído dos slides formam u
 
 O Whisper pode devolver centenas de fragmentos de poucos segundos. Quando a versão original ultrapassa 200 segmentos, o pipeline preserva essa versão 1 para auditoria e cria uma versão operacional compacta, agrupando 12 fragmentos consecutivos. Os limites globais em milissegundos continuam exatos e a tela deixa de exibir centenas de cartões sem contexto.
 
-Os segmentos operacionais são enviados em lotes de até 40 itens. Para evitar que o modelo copie incorretamente UUIDs longos, cada chamada usa índices curtos e ordenados; o servidor associa os índices de volta aos IDs imutáveis. A resposta final contém somente índice, texto corrigido e confiança e passa por schema Zod estrito. O lote inteiro é descartado se houver índice ausente/desconhecido, duplicação, campo extra inválido ou valor fora de faixa. Quando o modelo não preserva todos os índices ou devolve JSON/schema inválido, o worker subdivide o lote recursivamente e valida cada novo lote antes de persistir, evitando repetir trechos já corrigidos.
+Os segmentos operacionais são enviados em lotes de até 16 itens. Para evitar que o modelo copie incorretamente UUIDs longos, cada chamada usa índices curtos e ordenados; o servidor associa os índices de volta aos IDs imutáveis. A resposta final contém somente índice, texto corrigido e confiança e passa por schema Zod estrito. Cada provedor dispõe de até oito segundos nessa etapa. Se nenhum deles entregar uma resposta válida, o lote original imutável é preservado e o pipeline avança para a revisão global, que recebe uma segunda oportunidade de corrigi-lo. Um segmento individual longo pode ser dividido por frases em partes de até 1.200 caracteres e reunido com o mesmo timestamp. Nenhum trecho isolado ou resposta malformada bloqueia a entrega da aula inteira.
 
 Quando resta apenas um segmento e o modelo ainda não consegue produzir JSON válido, o worker solicita a correção como texto simples. Se essa resposta vier vazia, resumida ou excessivamente longa, o texto bruto preservado é usado para concluir o trecho. Erros de formato do fornecedor, portanto, não interrompem mais a aula nem exigem ação manual.
 
@@ -107,6 +107,8 @@ Para materiais, cada segmento usa:
 3. `raw_text` somente enquanto o lote ainda não foi corrigido.
 
 A geração é liberada depois da revisão global. O resumo é automático e libera a aula para estudo; apostila, flashcards, questões e mapa mental entram em prioridade inferior para não atrasar a próxima aula.
+
+O resumo consulta todo o ranking de IA com timeout limitado por provedor. Se nenhuma resposta válida estiver disponível, o worker produz imediatamente um resumo extrativo distribuído por toda a transcrição validada, com referências e timestamps reais. Esse fallback mantém a aula utilizável e impede que o estado de 95% bloqueie a entrega; uma resposta de IA válida continua sendo sempre a opção prioritária.
 
 ## Capacidade e failover
 
