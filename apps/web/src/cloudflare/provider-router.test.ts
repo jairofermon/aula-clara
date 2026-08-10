@@ -8,6 +8,57 @@ afterEach(() => vi.unstubAllGlobals());
 const segmentId = "00000000-0000-4000-8000-000000000001";
 
 describe("roteamento entre provedores gratuitos", () => {
+  it("prioriza Cerebras para geração estruturada", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        id: "cerebras-summary",
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                overview: "Visão geral gerada pelo Cerebras",
+                concepts: ["Conceito explicado de forma completa para orientar a revisão."],
+                mechanisms: [],
+                classifications: [],
+                cause_and_effect: [],
+                teacher_examples: [],
+                emphasized_points: [],
+                traps: [],
+                exam_items: [],
+                references: [{ timestamp_ms: 0, source_segment_ids: [segmentId] }]
+              })
+            }
+          }
+        ]
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const env = {
+      AI: { run: vi.fn(), aiGatewayLogId: null },
+      CEREBRAS_API_KEY: "csk_test_key_long_enough",
+      CEREBRAS_GENERATION_MODEL: "gpt-oss-120b",
+      GROQ_API_KEY: "gsk_test_key_long_enough",
+      GROQ_GENERATION_MODEL: "groq/compound",
+      CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      GEMINI_DATA_PROCESSING_CONSENT: "disabled",
+      OPENROUTER_DATA_PROCESSING_CONSENT: "disabled"
+    } as unknown as CloudflareEnv;
+
+    await expect(
+      generateWithWorkersAi(
+        env,
+        "summary",
+        [{ segment_id: segmentId, start_ms: 0, end_ms: 1000, speaker_label: null, text: "Texto" }],
+        { title: "Aula" }
+      )
+    ).resolves.toMatchObject({
+      data: { overview: "Visão geral gerada pelo Cerebras" },
+      modelName: "ai-composed:gpt-oss-120b"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(env.AI.run).not.toHaveBeenCalled();
+  });
+
   it("agenda um novo ciclo somente depois de consultar todos os provedores disponíveis", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("busy", { status: 429 })));
     const env = {

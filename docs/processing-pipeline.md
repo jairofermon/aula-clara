@@ -114,13 +114,13 @@ Apostila exige capítulos temáticos e proíbe horários como títulos; flashcar
 
 ## Capacidade e failover
 
-Cada resultado limitado ou potencialmente cobrado é persistido antes de completar o job. Reentrega e troca de fornecedor consultam essa persistência e não repetem uma etapa concluída. Groq, Cloudflare, Gemini e OpenRouter possuem limites independentes; o sistema usa o primeiro resultado válido e registra modelo, duração e unidades. Quando um provedor falha, o mesmo ciclo consulta imediatamente todos os seguintes. Se todos estiverem simultaneamente indisponíveis, o job permanece em `retry_wait` por 15 a 60 segundos e reinicia o ranking automaticamente, sem botão e sem limite terminal de tentativas para etapas de IA.
+Cada resultado limitado ou potencialmente cobrado é persistido antes de completar o job. Reentrega e troca de fornecedor consultam essa persistência e não repetem uma etapa concluída. Cerebras, Groq, Cloudflare, Gemini e OpenRouter possuem limites independentes; o sistema usa o primeiro resultado válido e registra modelo, duração e unidades. Quando um provedor falha, o mesmo ciclo consulta imediatamente todos os seguintes. Se todos estiverem simultaneamente indisponíveis, o job permanece em `retry_wait` por 15 a 60 segundos e reinicia o ranking automaticamente, sem botão e sem limite terminal de tentativas para etapas de IA.
 
 O ranking é reavaliado no início de cada chunk ou lote, permitindo que o provedor principal volte a ser usado assim que se recuperar:
 
 1. áudio: Groq Whisper Large V3, AssemblyAI Universal-3 Pro, Deepgram Nova-3, Workers AI Whisper e Gemini;
-2. revisão por trecho: Groq Llama Instant, Gemini Flash, Workers AI Llama e OpenRouter Free;
-3. revisão global e materiais: Groq Compound, Gemini Flash, Workers AI Llama e OpenRouter Free.
+2. revisão por trecho: Cerebras GPT OSS 120B, Groq Llama Instant, Gemini Flash, Workers AI Llama e OpenRouter Free;
+3. revisão global e materiais: Cerebras GPT OSS 120B, Groq Compound, Gemini Flash, Workers AI Llama e OpenRouter Free.
 
 Uma resposta só conta como disponibilidade quando também passa pelo schema e pelas regras semânticas da operação. HTTP 200 com JSON inválido não faz o pipeline avançar.
 

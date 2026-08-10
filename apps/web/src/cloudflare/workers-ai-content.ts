@@ -18,6 +18,7 @@ import {
 } from "./groq-provider";
 import { chatWithGemini, geminiEnabled } from "./gemini-provider";
 import { chatWithOpenRouter, openRouterEnabled } from "./openrouter-provider";
+import { cerebrasEnabled, chatWithCerebras } from "./cerebras-provider";
 
 interface StructuredResult<T> {
   data: T;
@@ -221,6 +222,28 @@ async function runStructured<T>(
     qualityCheck?.(result.data);
     return result;
   };
+  if (cerebrasEnabled(env)) {
+    try {
+      const serializedSchema = JSON.stringify(jsonSchema);
+      const responseFormat =
+        serializedSchema.length <= 5_000
+          ? {
+              type: "json_schema",
+              json_schema: { name: "aula_clara_response", strict: true, schema: jsonSchema }
+            }
+          : { type: "json_object" };
+      const result = await withProviderTimeout(
+        chatWithCerebras(env, messages, responseFormat, maxTokens),
+        providerTimeoutMs
+      );
+      return accept(result.response, {
+        ...result,
+        modelName: env.CEREBRAS_GENERATION_MODEL
+      });
+    } catch (error) {
+      rememberFailure("cerebras", error);
+    }
+  }
   if (groqEnabled(env)) {
     try {
       const strictSchema = model.startsWith("openai/gpt-oss");
@@ -374,6 +397,20 @@ async function reviewSingleAsPlainText(
     };
   };
   const failures: JobProcessingError[] = [];
+  if (cerebrasEnabled(env)) {
+    try {
+      const result = await withProviderTimeout(
+        chatWithCerebras(env, messages, undefined, 3000),
+        8_000
+      );
+      return {
+        ...validate(result.response, result),
+        modelName: env.CEREBRAS_GENERATION_MODEL
+      };
+    } catch (error) {
+      failures.push(classifyWorkersAiError(error));
+    }
+  }
   if (groqEnabled(env)) {
     try {
       const result = await withProviderTimeout(

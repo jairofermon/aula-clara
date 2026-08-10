@@ -144,9 +144,12 @@ O modelo `openrouter/free` mantém custo de inferência em zero; indisponibilida
 Reservas opcionais, sempre sem cobrança automática:
 
 ```powershell
+pnpm --filter @aula-clara/web exec wrangler secret put CEREBRAS_API_KEY
 pnpm --filter @aula-clara/web exec wrangler secret put GEMINI_API_KEY
 pnpm --filter @aula-clara/web exec wrangler secret put OPENROUTER_API_KEY
 ```
+
+O Cerebras usa `gpt-oss-120b` como primeira opção textual, com saída JSON estrita. Em recusa, limite ou indisponibilidade, o mesmo job continua imediatamente no próximo provedor configurado.
 
 Depois de revisar os termos de tratamento de dados, altere no `wrangler.jsonc` somente os consentimentos desejados para `accepted` e publique novamente. A presença da chave isoladamente nunca envia conteúdo a esses provedores.
 

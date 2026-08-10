@@ -12,7 +12,7 @@ Navegador → Cloudflare Workers/OpenNext → Supabase Auth/PostgreSQL/Storage
            transcrição, revisão e materiais persistidos
 ```
 
-A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui créditos da OpenAI API. O caminho gratuito usa Groq e Workers AI, com AssemblyAI, Deepgram e Gemini como reservas; `OPENAI_API_KEY` permanece opcional e exclusiva do worker Python local.
+A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui créditos da OpenAI API. O caminho gratuito usa Cerebras, Groq e Workers AI, com AssemblyAI, Deepgram, Gemini e OpenRouter como reservas; `OPENAI_API_KEY` permanece opcional e exclusiva do worker Python local.
 
 ## O que já funciona
 
@@ -170,6 +170,7 @@ Nenhum teste comum chama API paga. Veja [docs/testing.md](docs/testing.md).
 | `MAX_MATERIAL_UPLOAD_SIZE_MB`   | web/Worker         | Limite do Supabase Free: 50 MB por material.      |
 | `SIGNED_URL_TTL_SECONDS`        | web                | Validade dos downloads privados.                  |
 | `OPENAI_API_KEY`                | Python opcional    | Nunca necessária no caminho gratuito.             |
+| `CEREBRAS_API_KEY`              | segredo Cloudflare | Primeira opção gratuita para revisão e materiais. |
 | `GROQ_API_KEY`                  | segredo Cloudflare | Capacidade gratuita principal de áudio e texto.   |
 | `ASSEMBLYAI_API_KEY`            | segredo Cloudflare | Reserva assíncrona de alta precisão para áudio.   |
 | `DEEPGRAM_API_KEY`              | segredo Cloudflare | Reserva Nova-3 com diarização e timestamps.       |

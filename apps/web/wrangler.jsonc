@@ -36,6 +36,7 @@
   "secrets": {
     "required": [
       "SUPABASE_SERVICE_ROLE_KEY",
+      "CEREBRAS_API_KEY",
       "ASSEMBLYAI_API_KEY",
       "DEEPGRAM_API_KEY",
       "OPENROUTER_API_KEY"
@@ -61,6 +62,7 @@
     "GEMINI_GENERATION_MODEL": "gemini-2.5-flash",
     "GEMINI_DATA_PROCESSING_CONSENT": "accepted",
     "OPENROUTER_GENERATION_MODEL": "openrouter/free",
+    "CEREBRAS_GENERATION_MODEL": "gpt-oss-120b",
     "OPENROUTER_DATA_PROCESSING_CONSENT": "accepted"
   }
 }
