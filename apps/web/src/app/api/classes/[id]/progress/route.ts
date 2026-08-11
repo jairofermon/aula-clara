@@ -20,7 +20,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         "status,progress,current_stage,error_message,processing_priority,processing_started_at,target_ready_at,study_ready_at"
       )
       .eq("id", id)
-      .eq("user_id", context.user.id)
       .single(),
     context.supabase
       .from("audio_chunks")
@@ -31,11 +30,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .select("id", { count: "exact", head: true })
       .eq("class_id", id)
       .eq("status", "completed"),
-    context.supabase
-      .from("materials")
-      .select("status,material_type")
-      .eq("class_id", id)
-      .eq("user_id", context.user.id)
+    context.supabase.from("materials").select("status,material_type").eq("class_id", id)
   ]);
   const requestedMaterials = materials ?? [];
   const completedMaterials = requestedMaterials.filter(

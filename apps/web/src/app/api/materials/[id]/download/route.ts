@@ -11,7 +11,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     .from("materials")
     .select("storage_path")
     .eq("id", id)
-    .eq("user_id", context.user.id)
     .eq("status", "completed")
     .maybeSingle();
   if (!material?.storage_path)

@@ -17,26 +17,30 @@ export default async function DiagnosticsPage({ params }: { params: Promise<{ id
         "id,job_type,status,stage,progress,attempt_count,max_attempts,error_code,error_message,started_at,finished_at,updated_at"
       )
       .eq("class_id", id)
-      .order("created_at"),
+      .order("created_at", { ascending: false })
+      .limit(100),
     supabase
       .from("class_files")
       .select(
         "id,file_type,original_name,mime_type,size_bytes,duration_ms,sha256,upload_completed,created_at"
       )
       .eq("class_id", id)
-      .order("created_at"),
+      .order("created_at", { ascending: false })
+      .limit(20),
     supabase
       .from("audio_chunks")
       .select("id,chunk_index,start_ms,end_ms,size_bytes,status,created_at")
       .eq("class_id", id)
-      .order("chunk_index"),
+      .order("chunk_index")
+      .limit(100),
     supabase
       .from("usage_records")
       .select(
         "provider,model_name,operation_type,input_units,output_units,audio_seconds,estimated_cost,request_id,duration_ms,created_at"
       )
       .eq("class_id", id)
-      .order("created_at")
+      .order("created_at", { ascending: false })
+      .limit(100)
   ]);
   return (
     <main className="mx-auto max-w-6xl px-5 py-9">

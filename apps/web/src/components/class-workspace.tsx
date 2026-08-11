@@ -282,56 +282,73 @@ function MaterialsPanel({ classId, classTitle }: { classId: string; classTitle: 
       error?: { message: string };
     };
     if (response.ok && body.data?.client_generation) {
+      const materialId = body.data.id;
       try {
-        setMessage("Gerando o PDF no navegador…");
-        const start = await fetch(`/api/materials/${body.data.id}/pdf-upload`, { method: "POST" });
-        const startBody = (await start.json()) as {
-          data?: {
-            completed?: boolean;
-            signed_url: string;
-            class_title: string;
-            subject_name: string;
-            class_date: string;
-            transcript_version: number;
-            transcript: Array<{
-              start_ms: number;
-              end_ms: number;
-              speaker_label: string | null;
-              text: string;
-            }>;
-          };
-          error?: { message: string };
-        };
-        if (!start.ok || !startBody.data)
-          throw new Error(startBody.error?.message ?? "Não foi possível preparar o PDF.");
-        if (startBody.data.completed) {
-          setMessage("PDF pronto para download.");
-          await load();
-          return;
+        let lastError: Error | null = null;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          try {
+            setMessage(
+              attempt === 1
+                ? "Gerando o PDF no navegador…"
+                : `Retomando o PDF automaticamente (${attempt}/3)…`
+            );
+            const start = await fetch(`/api/materials/${materialId}/pdf-upload`, {
+              method: "POST"
+            });
+            const startBody = (await start.json()) as {
+              data?: {
+                completed?: boolean;
+                signed_url: string;
+                class_title: string;
+                subject_name: string;
+                class_date: string;
+                transcript_version: number;
+                transcript: Array<{
+                  start_ms: number;
+                  end_ms: number;
+                  speaker_label: string | null;
+                  text: string;
+                }>;
+              };
+              error?: { message: string };
+            };
+            if (!start.ok || !startBody.data)
+              throw new Error(startBody.error?.message ?? "Não foi possível preparar o PDF.");
+            if (startBody.data.completed) {
+              setMessage("PDF pronto para download.");
+              await load();
+              return;
+            }
+            const { buildTranscriptPdf } = await import("@/lib/client-pdf");
+            const bytes = await buildTranscriptPdf({
+              classTitle: startBody.data.class_title,
+              subjectName: startBody.data.subject_name,
+              classDate: startBody.data.class_date,
+              transcriptVersion: startBody.data.transcript_version,
+              transcript: startBody.data.transcript
+            });
+            const upload = await fetch(startBody.data.signed_url, {
+              method: "PUT",
+              headers: { "content-type": "application/pdf", "x-upsert": "true" },
+              body: new Blob([Uint8Array.from(bytes)], { type: "application/pdf" })
+            });
+            if (!upload.ok) throw new Error("O PDF não chegou ao armazenamento privado.");
+            const complete = await fetch(`/api/materials/${materialId}/pdf-upload`, {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action: "complete" })
+            });
+            if (!complete.ok) throw new Error("Não foi possível confirmar o PDF.");
+            setMessage("PDF pronto para download.");
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error instanceof Error ? error : new Error("Falha ao gerar o PDF.");
+          }
         }
-        const { buildTranscriptPdf } = await import("@/lib/client-pdf");
-        const bytes = await buildTranscriptPdf({
-          classTitle: startBody.data.class_title,
-          subjectName: startBody.data.subject_name,
-          classDate: startBody.data.class_date,
-          transcriptVersion: startBody.data.transcript_version,
-          transcript: startBody.data.transcript
-        });
-        const upload = await fetch(startBody.data.signed_url, {
-          method: "PUT",
-          headers: { "content-type": "application/pdf", "x-upsert": "true" },
-          body: new Blob([Uint8Array.from(bytes)], { type: "application/pdf" })
-        });
-        if (!upload.ok) throw new Error("O PDF não chegou ao armazenamento privado.");
-        const complete = await fetch(`/api/materials/${body.data.id}/pdf-upload`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "complete" })
-        });
-        if (!complete.ok) throw new Error("Não foi possível confirmar o PDF.");
-        setMessage("PDF pronto para download.");
+        if (lastError) throw lastError;
       } catch (error) {
-        await fetch(`/api/materials/${body.data.id}/pdf-upload`, {
+        await fetch(`/api/materials/${materialId}/pdf-upload`, {
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ action: "fail" })

@@ -39,4 +39,27 @@ describe("processScheduledJobs", () => {
     expect(repository.complete).toHaveBeenCalledTimes(1);
     expect(repository.readyJobIds).toHaveBeenCalledWith(1);
   });
+
+  it("continua o sweep quando outro consumidor vence a disputa pelo primeiro job", async () => {
+    const secondJobId = "7f9d91e2-8f48-4dad-a9f9-4ba186ca3486";
+    const repository: ScheduledJobRepository = {
+      readyJobIds: vi
+        .fn()
+        .mockResolvedValueOnce([job.id])
+        .mockResolvedValueOnce([secondJobId])
+        .mockResolvedValueOnce([]),
+      claim: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ ...job, id: secondJobId }),
+      complete: vi.fn(),
+      continue: vi.fn(),
+      fail: vi.fn()
+    };
+    const processor = { process: vi.fn().mockResolvedValue({ output: { ok: true } }) };
+
+    await expect(processScheduledJobs(repository, processor, 3)).resolves.toBe(1);
+    expect(processor.process).toHaveBeenCalledOnce();
+    expect(repository.complete).toHaveBeenCalledWith(secondJobId, { ok: true });
+  });
 });

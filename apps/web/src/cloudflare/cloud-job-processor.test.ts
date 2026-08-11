@@ -53,10 +53,10 @@ describe("processador gratuito", () => {
     expect(result.output.resumed).toBe(true);
   });
 
-  it("preserva e conclui o lote quando a IA devolve resposta inconsistente", async () => {
+  it("não persiste revisão quando a IA devolve resposta inconsistente", async () => {
     const firstId = "00000000-0000-4000-8000-000000000010";
     const secondId = "00000000-0000-4000-8000-000000000011";
-    const run = vi.fn().mockResolvedValue({ response: "resposta que não é JSON" });
+    const run = vi.fn().mockResolvedValue({ response: "" });
     const applyReviewBatch = vi
       .fn()
       .mockResolvedValue({ applied: 2, remaining: 0, needs_review: 0 });
@@ -77,24 +77,19 @@ describe("processador gratuito", () => {
     } as unknown as CloudflareEnv;
     const reviewJob = { ...job, job_type: "review_transcript" as const };
 
-    const result = await createCloudJobProcessor(env, repository).process(reviewJob);
-
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(repository.reviewBatch).toHaveBeenCalledWith(job.id, 16);
-    expect(applyReviewBatch).toHaveBeenCalledTimes(1);
-    expect(applyReviewBatch).toHaveBeenCalledWith(
-      job.id,
-      [
-        expect.objectContaining({ segment_id: firstId, revised_text: "Primeiro." }),
-        expect.objectContaining({ segment_id: secondId, revised_text: "Segundo." })
-      ],
-      "original-preserved-after-provider-failover",
-      expect.any(Object)
+    await expect(createCloudJobProcessor(env, repository).process(reviewJob)).rejects.toMatchObject(
+      {
+        code: expect.stringContaining("all_text_providers_failed:"),
+        transient: true
+      }
     );
-    expect(result.output).toMatchObject({ reviewed: 2, needs_review: 0 });
+
+    expect(run.mock.calls.length).toBeGreaterThan(1);
+    expect(repository.reviewBatch).toHaveBeenCalledWith(job.id, 16);
+    expect(applyReviewBatch).not.toHaveBeenCalled();
   });
 
-  it("persiste o lote preservado quando todos os provedores estão indisponíveis", async () => {
+  it("mantém o job para retry quando todos os provedores estão indisponíveis", async () => {
     const firstId = "00000000-0000-4000-8000-000000000010";
     const secondId = "00000000-0000-4000-8000-000000000011";
     const applyReviewBatch = vi.fn().mockResolvedValue({
@@ -122,25 +117,53 @@ describe("processador gratuito", () => {
       MAX_TRANSCRIPTION_CHUNK_MB: "15"
     } as unknown as CloudflareEnv;
 
+    await expect(
+      createCloudJobProcessor(env, repository).process({
+        ...job,
+        job_type: "review_transcript"
+      })
+    ).rejects.toMatchObject({ transient: true });
+
+    expect(applyReviewBatch).not.toHaveBeenCalled();
+  });
+
+  it("limita a revisão por execução e solicita continuação imediata", async () => {
+    const segmentId = "00000000-0000-4000-8000-000000000010";
+    const reviewBatch = vi.fn().mockResolvedValue({
+      context: "Aula de teste",
+      segments: [{ segment_id: segmentId, raw_text: "Trecho da aula.", start_ms: 0, end_ms: 1000 }]
+    });
+    const applyReviewBatch = vi
+      .fn()
+      .mockResolvedValueOnce({ applied: 1, remaining: 3, needs_review: 0 })
+      .mockResolvedValueOnce({ applied: 1, remaining: 2, needs_review: 0 });
+    const repository = { reviewBatch, applyReviewBatch } as unknown as SupabaseJobRepository;
+    const env = {
+      AI: {
+        run: vi.fn().mockResolvedValue({
+          response: {
+            segments: [{ index: 0, revised_text: "Trecho da aula revisado.", confidence: 0.9 }]
+          }
+        })
+      },
+      CLOUDFLARE_REVIEW_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      MAX_TRANSCRIPTION_CHUNK_MB: "15"
+    } as unknown as CloudflareEnv;
+
     const result = await createCloudJobProcessor(env, repository).process({
       ...job,
       job_type: "review_transcript"
     });
 
-    expect(applyReviewBatch).toHaveBeenCalledWith(
-      job.id,
-      [
-        expect.objectContaining({ segment_id: firstId, revised_text: "Primeiro." }),
-        expect.objectContaining({ segment_id: secondId, revised_text: "Segundo." })
-      ],
-      "original-preserved-after-provider-failover",
-      expect.any(Object)
-    );
-    expect(result.output).toMatchObject({ reviewed: 2, needs_review: 0 });
-    expect(result.nextJobIds).toEqual(["00000000-0000-4000-8000-000000000012"]);
+    expect(reviewBatch).toHaveBeenCalledTimes(2);
+    expect(applyReviewBatch).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      output: { reviewed: 2, continuing: true },
+      continueJob: true
+    });
   });
 
-  it("não bloqueia a entrega quando todos os provedores falham na segunda revisão", async () => {
+  it("não valida a transcrição quando a revisão global falha", async () => {
     const summaryJobId = "00000000-0000-4000-8000-000000000020";
     const applyGlobalReview = vi.fn().mockResolvedValue({
       applied: 0,
@@ -175,22 +198,110 @@ describe("processador gratuito", () => {
       input_json: { phase: "global" }
     };
 
-    const result = await createCloudJobProcessor(env, repository).process(globalJob);
+    await expect(createCloudJobProcessor(env, repository).process(globalJob)).rejects.toMatchObject(
+      {
+        transient: true
+      }
+    );
 
-    expect(applyGlobalReview).toHaveBeenCalledWith(
+    expect(applyGlobalReview).not.toHaveBeenCalled();
+  });
+
+  it("persiste uma parte do material por execução e retoma do checkpoint", async () => {
+    const materialId = "00000000-0000-4000-8000-000000000030";
+    const transcript = Array.from({ length: 2 }, (_, index) => ({
+      segment_id: `00000000-0000-4000-8000-${(index + 60).toString().padStart(12, "0")}`,
+      start_ms: index * 60_000,
+      end_ms: (index + 1) * 60_000,
+      speaker_label: null,
+      text: `Explicação acadêmica detalhada da parte ${index + 1}. `.repeat(180)
+    }));
+    const run = vi.fn().mockImplementation(async (_model: string, request: unknown) => {
+      const messages = (request as { messages: Array<{ content: string }> }).messages;
+      const payload = JSON.parse(messages[1]!.content) as {
+        transcript: Array<{ segment_id: string; start_ms: number }>;
+      };
+      const source = payload.transcript[0]!;
+      const partNumber = run.mock.calls.length;
+      return {
+        response: {
+          title: "Apostila retomável",
+          chronological_index: [`Parte ${partNumber}`],
+          sections: [
+            {
+              title: `Conceitos da parte ${partNumber}`,
+              body: "Este capítulo explica os conceitos centrais de forma didática e relaciona definições, mecanismos, consequências e aplicações práticas. O conteúdo acadêmico é organizado em uma sequência coerente, sem repetições da fala, preservando os exemplos necessários para compreensão e revisão posterior. ".repeat(
+                3
+              ),
+              timestamp_ms: source.start_ms,
+              source_segment_ids: [source.segment_id]
+            }
+          ],
+          teacher_examples: [],
+          emphasized_points: [`Ênfase da parte ${partNumber}.`],
+          remaining_questions: []
+        }
+      };
+    });
+    const saveProviderState = vi.fn().mockResolvedValue(undefined);
+    const finishMaterial = vi.fn().mockResolvedValue({
+      material_id: materialId,
+      completed: true
+    });
+    const repository = {
+      materialInput: vi.fn().mockResolvedValue({
+        material_id: materialId,
+        material_type: "notes",
+        source_transcript_version: 3,
+        already_completed: false,
+        class_context: {
+          title: "Aula de teste",
+          topic: "Tema",
+          teacher_name: null,
+          class_date: "2026-08-09",
+          language: "pt",
+          subject_name: "Disciplina"
+        },
+        transcript
+      }),
+      saveProviderState,
+      finishMaterial
+    } as unknown as SupabaseJobRepository;
+    const env = {
+      AI: { run, aiGatewayLogId: null },
+      CLOUDFLARE_GENERATION_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast",
+      MAX_TRANSCRIPTION_CHUNK_MB: "15"
+    } as unknown as CloudflareEnv;
+    const processor = createCloudJobProcessor(env, repository);
+    const materialJob = { ...job, job_type: "generate_notes" as const, output_json: {} };
+
+    const first = await processor.process(materialJob);
+
+    expect(first.continueJob).toBe(true);
+    expect(first.output).toMatchObject({ parts_completed: 1, parts_total: 2 });
+    expect(saveProviderState).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(finishMaterial).not.toHaveBeenCalled();
+
+    const second = await processor.process({
+      ...materialJob,
+      output_json: first.output
+    });
+
+    expect(second.continueJob).toBeUndefined();
+    expect(second.output).toMatchObject({ material_id: materialId, resumed: false });
+    expect(saveProviderState).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(finishMaterial).toHaveBeenCalledTimes(1);
+    expect(finishMaterial).toHaveBeenCalledWith(
       job.id,
-      [],
-      1,
-      "segment-review-validated",
+      expect.objectContaining({
+        chronological_index: ["Conceitos da parte 1", "Conceitos da parte 2"]
+      }),
+      expect.any(String),
+      expect.stringContaining("ai-composed"),
       expect.any(Object)
     );
-    expect(result.output).toMatchObject({
-      checked: 1,
-      patches_applied: 0,
-      global_review_fallback: true,
-      transcript_validated: true
-    });
-    expect(result.nextJobIds).toEqual([summaryJobId]);
   });
 
   it.each([

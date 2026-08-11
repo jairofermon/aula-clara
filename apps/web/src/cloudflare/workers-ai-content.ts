@@ -453,20 +453,20 @@ async function reviewSingleAsPlainText(
       failures.push(classifyWorkersAiError(error));
     }
   }
-  // A revisão global ainda fará uma segunda leitura. Um único trecho problemático
-  // não pode manter a aula inteira presa em um ciclo sem progresso.
-  return {
-    data: {
-      segments: [
-        {
-          segment_id: segment.segment_id,
-          revised_text: segment.raw_text,
-          confidence: 0.5
-        }
-      ]
-    },
-    modelName: "original-preserved-after-provider-failover"
-  };
+  const nextRetry = failures
+    .slice(1)
+    .reduce(earliestRetry, failures[0] ?? classifyWorkersAiError(null));
+  const failureCodes = failures
+    .map((failure) => failure.code)
+    .filter((code, index, items) => items.indexOf(code) === index)
+    .join("+")
+    .slice(0, 180);
+  throw new JobProcessingError(
+    `all_text_providers_failed:${failureCodes || "unknown"}`,
+    "Nenhum provedor produziu uma revisão real deste trecho. A revisão será retomada automaticamente.",
+    true,
+    Math.max(5, Math.min(nextRetry.retryDelaySeconds ?? 15, 60))
+  );
 }
 
 function splitLongReviewText(text: string, maximumCharacters = 1200): string[] {
@@ -529,15 +529,49 @@ async function reviewLongSegmentAsPlainText(
         }
       ]
     },
-    modelName: results.every(
-      (result) => result.modelName === "original-preserved-after-provider-failover"
-    )
-      ? "original-preserved-after-provider-failover"
-      : model,
+    modelName: model,
     inputUnits: results.reduce((total, result) => total + (result.inputUnits ?? 0), 0),
     outputUnits: results.reduce((total, result) => total + (result.outputUnits ?? 0), 0),
     requestId: undefined
   };
+}
+
+type ReviewedSegment = {
+  segment_id: string;
+  revised_text: string;
+  confidence: number;
+};
+
+type ReviewBatchResult = StructuredResult<{ segments: ReviewedSegment[] }>;
+
+function combineReviewResults(
+  left: ReviewBatchResult,
+  right: ReviewBatchResult
+): ReviewBatchResult {
+  return {
+    data: { segments: [...left.data.segments, ...right.data.segments] },
+    modelName: `ai-composed:${[left.modelName, right.modelName].filter(Boolean).join("+")}`,
+    inputUnits: (left.inputUnits ?? 0) + (right.inputUnits ?? 0),
+    outputUnits: (left.outputUnits ?? 0) + (right.outputUnits ?? 0),
+    requestId: right.requestId ?? left.requestId
+  };
+}
+
+async function reviewSplitBatch(
+  env: CloudflareEnv,
+  segments: ReadonlyArray<{
+    segment_id: string;
+    raw_text: string;
+    start_ms: number;
+    end_ms: number;
+  }>,
+  context: string,
+  model: string
+): Promise<ReviewBatchResult> {
+  const middle = Math.ceil(segments.length / 2);
+  const left = await reviewWithWorkersAi(env, segments.slice(0, middle), context, model);
+  const right = await reviewWithWorkersAi(env, segments.slice(middle), context, model);
+  return combineReviewResults(left, right);
 }
 
 export async function reviewWithWorkersAi(
@@ -550,7 +584,7 @@ export async function reviewWithWorkersAi(
   }>,
   context: string,
   model = activeReviewModel(env)
-) {
+): Promise<ReviewBatchResult> {
   let result: Awaited<ReturnType<typeof runStructured<z.infer<typeof indexedReviewBatchSchema>>>>;
   try {
     result = await runStructured(
@@ -581,8 +615,11 @@ export async function reviewWithWorkersAi(
         "groq_request_too_large",
         "groq_invalid_request"
       ].includes(error.code);
-    if (recoverableReviewError && segments.length === 1) {
-      return reviewLongSegmentAsPlainText(env, segments[0]!, context, model);
+    if (recoverableReviewError) {
+      if (segments.length === 1) {
+        return reviewLongSegmentAsPlainText(env, segments[0]!, context, model);
+      }
+      return reviewSplitBatch(env, segments, context, model);
     }
     throw error;
   }
@@ -593,11 +630,7 @@ export async function reviewWithWorkersAi(
     returned.some((index) => index < 0 || index >= segments.length)
   ) {
     if (segments.length === 1) return reviewSingleAsPlainText(env, segments[0]!, context, model);
-    throw new JobProcessingError(
-      "review_segment_ids_mismatch",
-      "A revisão não preservou os segmentos recebidos. Uma nova tentativa será feita.",
-      true
-    );
+    return reviewSplitBatch(env, segments, context, model);
   }
   return {
     ...result,
@@ -681,6 +714,29 @@ const materialSchemas = {
 
 export type GeneratableMaterial = keyof typeof materialSchemas;
 
+export interface MaterialGenerationPart {
+  data: unknown;
+  modelName?: string;
+  inputUnits?: number;
+  outputUnits?: number;
+  requestId?: string;
+}
+
+export interface MaterialGenerationOptions {
+  completedParts?: MaterialGenerationPart[];
+  maxNewParts?: number;
+  onCheckpoint?: (parts: MaterialGenerationPart[]) => Promise<void>;
+}
+
+type CompletedMaterialGeneration = StructuredResult<unknown> & { completed: true };
+
+type PendingMaterialGeneration = {
+  completed: false;
+  completedParts: MaterialGenerationPart[];
+  partsCompleted: number;
+  partsTotal: number;
+};
+
 type MaterialTranscriptSegment = {
   segment_id: string;
   start_ms: number;
@@ -691,7 +747,7 @@ type MaterialTranscriptSegment = {
 
 function splitMaterialTranscript(
   transcript: ReadonlyArray<MaterialTranscriptSegment>,
-  maximumCharacters = 8_000
+  maximumCharacters = 4_000
 ): MaterialTranscriptSegment[][] {
   const chunks: MaterialTranscriptSegment[][] = [];
   let current: MaterialTranscriptSegment[] = [];
@@ -988,6 +1044,19 @@ function verifySourceReferences(
   }
 }
 
+export function generateWithWorkersAi(
+  env: CloudflareEnv,
+  materialType: GeneratableMaterial,
+  transcript: ReadonlyArray<MaterialTranscriptSegment>,
+  classContext: Record<string, unknown>
+): Promise<CompletedMaterialGeneration>;
+export function generateWithWorkersAi(
+  env: CloudflareEnv,
+  materialType: GeneratableMaterial,
+  transcript: ReadonlyArray<MaterialTranscriptSegment>,
+  classContext: Record<string, unknown>,
+  options: MaterialGenerationOptions
+): Promise<CompletedMaterialGeneration | PendingMaterialGeneration>;
 export async function generateWithWorkersAi(
   env: CloudflareEnv,
   materialType: GeneratableMaterial,
@@ -998,8 +1067,9 @@ export async function generateWithWorkersAi(
     speaker_label: string | null;
     text: string;
   }>,
-  classContext: Record<string, unknown>
-) {
+  classContext: Record<string, unknown>,
+  options?: MaterialGenerationOptions
+): Promise<CompletedMaterialGeneration | PendingMaterialGeneration> {
   const schema = materialSchemas[materialType] as z.ZodType<unknown>;
   const transcriptCharacters = transcript.reduce(
     (total, segment) => total + segment.text.length,
@@ -1021,8 +1091,13 @@ export async function generateWithWorkersAi(
   };
   const transcriptParts = splitMaterialTranscript(transcript);
   const minimumItemsPerPart = Math.max(3, Math.ceil(10 / transcriptParts.length));
-  const generatedParts: StructuredResult<unknown>[] = [];
+  const generatedParts: StructuredResult<unknown>[] = (options?.completedParts ?? [])
+    .slice(0, transcriptParts.length)
+    .map((part) => ({ ...part, data: schema.parse(part.data) }));
+  const maxNewParts = Math.max(1, options?.maxNewParts ?? Number.POSITIVE_INFINITY);
+  let newParts = 0;
   for (const [partIndex, transcriptPart] of transcriptParts.entries()) {
+    if (partIndex < generatedParts.length) continue;
     const partStart = transcriptPart[0]?.start_ms ?? 0;
     const partEnd = transcriptPart.at(-1)?.end_ms ?? maximumTimestampMs;
     const partRequirement =
@@ -1091,6 +1166,24 @@ export async function generateWithWorkersAi(
         }
       )
     );
+    newParts += 1;
+    await options?.onCheckpoint?.(
+      generatedParts.map((part) => ({
+        data: part.data,
+        modelName: part.modelName,
+        inputUnits: part.inputUnits,
+        outputUnits: part.outputUnits,
+        requestId: part.requestId
+      }))
+    );
+    if (newParts >= maxNewParts && generatedParts.length < transcriptParts.length) {
+      return {
+        completed: false as const,
+        completedParts: generatedParts,
+        partsCompleted: generatedParts.length,
+        partsTotal: transcriptParts.length
+      };
+    }
   }
   const combined = combineMaterialParts(
     materialType,
@@ -1100,6 +1193,7 @@ export async function generateWithWorkersAi(
   verifySourceReferences(combined, allowedSegmentIds, maximumTimestampMs);
   assertMaterialQuality(materialType, combined, transcriptCharacters, maximumTimestampMs);
   return {
+    completed: true as const,
     data: combined,
     modelName: `ai-composed:${[...new Set(generatedParts.map((part) => part.modelName).filter(Boolean))].join("+")}`,
     inputUnits: generatedParts.reduce((total, part) => total + (part.inputUnits ?? 0), 0),

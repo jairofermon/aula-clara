@@ -34,8 +34,9 @@ export async function processScheduledJobs(
       async () => undefined
     );
 
-    if (result === "ignored") break;
-    processed += 1;
+    // Outro consumidor pode ter reclamado o mesmo job entre a listagem e o
+    // claim. Isso não deve interromper o sweep e deixar os demais aguardando.
+    if (result !== "ignored") processed += 1;
   }
 
   return processed;

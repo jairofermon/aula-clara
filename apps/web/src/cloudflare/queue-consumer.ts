@@ -2,6 +2,7 @@ import { JobProcessingError, type ProcessingJob, processingQueueMessageSchema } 
 
 export interface QueueRepository {
   claim(jobId: string): Promise<ProcessingJob | null>;
+  renew?(jobId: string): Promise<boolean>;
   complete(jobId: string, output: Record<string, unknown>): Promise<void>;
   continue(jobId: string, output: Record<string, unknown>): Promise<void>;
   fail(
@@ -13,6 +14,31 @@ export interface QueueRepository {
       retryDelaySeconds?: number;
     }
   ): Promise<"retry_wait" | "failed" | "ignored">;
+}
+
+// O menor TTL aceito pelo banco é 30 s; renovar em 20 s mantém margem mesmo
+// se a configuração for reduzida no futuro.
+const LOCK_RENEWAL_INTERVAL_MS = 20_000;
+
+async function processWithLockRenewal(
+  job: ProcessingJob,
+  repository: QueueRepository,
+  processor: CloudJobProcessor
+): Promise<Awaited<ReturnType<CloudJobProcessor["process"]>>> {
+  if (!repository.renew) return processor.process(job);
+
+  const interval = setInterval(() => {
+    // Uma falha isolada de heartbeat não deve descartar o resultado de uma
+    // chamada paga que ainda está em andamento. O próximo heartbeat tenta de
+    // novo e, se o lock realmente vencer, o claim idempotente faz a retomada.
+    void repository.renew?.(job.id).catch(() => undefined);
+  }, LOCK_RENEWAL_INTERVAL_MS);
+
+  try {
+    return await processor.process(job);
+  } finally {
+    clearInterval(interval);
+  }
 }
 
 export interface CloudJobProcessor {
@@ -64,7 +90,7 @@ export async function consumeDelivery(
     return "ignored";
   }
   try {
-    const result = await processor.process(job);
+    const result = await processWithLockRenewal(job, repository, processor);
     if (result.continueJob) {
       await repository.continue(job.id, result.output);
       if (result.continueDelaySeconds) {

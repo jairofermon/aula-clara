@@ -227,6 +227,15 @@ export class SupabaseJobRepository implements QueueRepository {
     return rows[0] ?? null;
   }
 
+  async renew(jobId: string): Promise<boolean> {
+    const value = await this.rpc("renew_job_lock", {
+      p_job_id: jobId,
+      p_worker_id: this.env.WORKER_ID
+    });
+    if (typeof value !== "boolean") throw new Error("invalid_lock_renewal_response");
+    return value;
+  }
+
   async complete(jobId: string, output: Record<string, unknown>): Promise<void> {
     await this.rpc("complete_processing_job", {
       p_job_id: jobId,
@@ -266,17 +275,10 @@ export class SupabaseJobRepository implements QueueRepository {
   }
 
   async readyJobIds(limit = 20): Promise<string[]> {
-    const query = new URLSearchParams({
-      select: "id",
-      // Jobs em execução pertencem a uma entrega ativa da fila. Consultá-los
-      // aqui faria o cron girar sobre o mesmo lock e desperdiçar capacidade.
-      status: "in.(pending,retry_wait)",
-      next_attempt_at: `lte.${new Date().toISOString()}`,
-      order: "priority.desc,next_attempt_at.asc,created_at.asc",
-      limit: String(limit)
+    const value = await this.rpc("get_ready_processing_job_ids", {
+      p_limit: limit,
+      p_lock_ttl_seconds: Number(this.env.WORKER_LOCK_TTL_SECONDS)
     });
-    const response = await this.request(`/rest/v1/processing_jobs?${query}`, { method: "GET" });
-    const value = (await response.json()) as unknown;
     if (!Array.isArray(value)) throw new Error("invalid_pending_jobs_response");
     return value.flatMap((item) =>
       typeof item === "object" && item !== null && typeof (item as { id?: unknown }).id === "string"

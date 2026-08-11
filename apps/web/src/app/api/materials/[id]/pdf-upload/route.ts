@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { getApiContext } from "@/lib/auth";
 import { apiError, safeJson, validationError } from "@/lib/http";
+import { packageClassState } from "@/lib/pdf-completion";
 
 const completionSchema = z.object({ action: z.enum(["complete", "fail"]) }).strict();
 
@@ -32,17 +33,19 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .from("materials")
     .select("id,class_id,user_id,status,version,source_transcript_version,storage_path")
     .eq("id", id)
-    .eq("user_id", context.user.id)
     .eq("material_type", "pdf")
     .maybeSingle();
   if (!material) return apiError("Exportação não encontrada.", 404, "not_found");
 
+  if (material.status === "completed" && material.storage_path) {
+    return Response.json({ data: { completed: true } });
+  }
+
   const [{ data: klass }, { data: transcript }] = await Promise.all([
     context.supabase
       .from("classes")
-      .select("id,subject_id,title,class_date,transcript_version")
+      .select("id,user_id,subject_id,title,class_date,transcript_version")
       .eq("id", material.class_id)
-      .eq("user_id", context.user.id)
       .single(),
     context.supabase
       .from("transcript_segments")
@@ -61,32 +64,31 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .from("subjects")
     .select("name")
     .eq("id", klass.subject_id)
-    .eq("user_id", context.user.id)
     .single();
   if (!subject) return apiError("Disciplina não encontrada.", 404, "not_found");
 
   const storagePath =
     material.storage_path ??
-    `${context.user.id}/${material.class_id}/transcricao-v${material.version}-${randomUUID()}.pdf`;
+    `${material.user_id}/${material.class_id}/transcricao-v${material.version}-${randomUUID()}.pdf`;
   const { error: updateError } = await context.supabase
     .from("materials")
     .update({ status: "generating", storage_path: storagePath, error_message: null })
     .eq("id", material.id)
-    .eq("user_id", context.user.id);
+    .eq("user_id", material.user_id);
   if (updateError) return apiError("Não foi possível preparar o PDF.", 500);
 
   const pdfJob = await findPdfJob(
     context.supabase,
     material.id,
     material.class_id,
-    context.user.id
+    material.user_id
   );
   if (pdfJob) {
     await context.supabase
       .from("processing_jobs")
       .update({ stage: "browser_rendering", progress: 50, locked_at: new Date().toISOString() })
       .eq("id", pdfJob.id)
-      .eq("user_id", context.user.id);
+      .eq("user_id", material.user_id);
   }
 
   const { data: signed, error: signedError } = await context.supabase.storage
@@ -122,7 +124,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     .from("materials")
     .select("id,class_id,user_id,status,source_transcript_version,storage_path")
     .eq("id", id)
-    .eq("user_id", context.user.id)
     .eq("material_type", "pdf")
     .maybeSingle();
   if (!material) return apiError("Exportação não encontrada.", 404, "not_found");
@@ -132,14 +133,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       context.supabase,
       material.id,
       material.class_id,
-      context.user.id
+      material.user_id
     );
     await Promise.all([
       context.supabase
         .from("materials")
         .update({ status: "failed", error_message: "O navegador não conseguiu gerar o PDF." })
         .eq("id", material.id)
-        .eq("user_id", context.user.id),
+        .eq("user_id", material.user_id),
       ...(pdfJob
         ? [
             context.supabase
@@ -154,7 +155,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
                 locked_by: null
               })
               .eq("id", pdfJob.id)
-              .eq("user_id", context.user.id)
+              .eq("user_id", material.user_id)
           ]
         : [])
     ]);
@@ -185,21 +186,28 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       error_message: null
     })
     .eq("id", material.id)
-    .eq("user_id", context.user.id);
+    .eq("user_id", material.user_id);
   if (error) return apiError("Não foi possível concluir o PDF.", 500);
 
   const pdfJob = await findPdfJob(
     context.supabase,
     material.id,
     material.class_id,
-    context.user.id
+    material.user_id
   );
+  const { data: classMaterials } = await context.supabase
+    .from("materials")
+    .select("material_type,status,version")
+    .eq("class_id", material.class_id)
+    .eq("user_id", material.user_id)
+    .eq("source_transcript_version", material.source_transcript_version);
+  const classState = packageClassState(classMaterials ?? []);
   await Promise.all([
     context.supabase
       .from("classes")
-      .update({ status: "completed", progress: 100, current_stage: "PDF pronto" })
+      .update(classState)
       .eq("id", material.class_id)
-      .eq("user_id", context.user.id),
+      .eq("user_id", material.user_id),
     ...(pdfJob
       ? [
           context.supabase
@@ -218,7 +226,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
               locked_by: null
             })
             .eq("id", pdfJob.id)
-            .eq("user_id", context.user.id)
+            .eq("user_id", material.user_id)
         ]
       : []),
     context.supabase.from("audit_events").insert({

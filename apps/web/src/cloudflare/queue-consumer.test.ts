@@ -23,6 +23,34 @@ function delivery(body: unknown) {
 }
 
 describe("consumidor da fila Cloudflare", () => {
+  it("renova o lock durante uma etapa demorada", async () => {
+    vi.useFakeTimers();
+    let finish!: (value: { output: Record<string, unknown> }) => void;
+    const processing = new Promise<{ output: Record<string, unknown> }>((resolve) => {
+      finish = resolve;
+    });
+    const renew = vi.fn().mockResolvedValue(true);
+    const item = delivery({ job_id: job.id });
+    const consuming = consumeDelivery(
+      item,
+      {
+        claim: vi.fn().mockResolvedValue(job),
+        renew,
+        complete: vi.fn(),
+        continue: vi.fn(),
+        fail: vi.fn()
+      },
+      { process: vi.fn().mockReturnValue(processing) },
+      vi.fn()
+    );
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(renew).toHaveBeenCalledWith(job.id);
+    finish({ output: { ok: true } });
+    await expect(consuming).resolves.toBe("completed");
+    vi.useRealTimers();
+  });
+
   it("confirma a entrega somente depois de persistir o resultado", async () => {
     const item = delivery({ job_id: job.id });
     const complete = vi.fn().mockResolvedValue(undefined);

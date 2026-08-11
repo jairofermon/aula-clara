@@ -23,7 +23,12 @@ export default {
         processor,
         // A continuação fica persistida no PostgreSQL. O cron abaixo a retoma
         // sem gastar uma nova operação da fila a cada lote de IA.
-        async () => undefined
+        async (jobId, options) => {
+          await env.PROCESSING_QUEUE.send(
+            { job_id: jobId },
+            options?.delaySeconds ? { delaySeconds: options.delaySeconds } : undefined
+          );
+        }
       );
       console.log(
         JSON.stringify({
@@ -38,7 +43,7 @@ export default {
   async scheduled(_controller: ScheduledController, env: CloudflareEnv) {
     const repository = new SupabaseJobRepository(env);
     const processor = createCloudJobProcessor(env, repository);
-    const processedJobs = await processScheduledJobs(repository, processor, 3);
+    const processedJobs = await processScheduledJobs(repository, processor, 1);
     console.log(
       JSON.stringify({ event: "processing_scheduler.sweep", processed_jobs: processedJobs })
     );

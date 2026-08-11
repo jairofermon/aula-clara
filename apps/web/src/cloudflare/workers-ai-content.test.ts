@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JobProcessingError } from "./contracts";
 import { generateWithWorkersAi, reviewWithWorkersAi } from "./workers-ai-content";
+import type { MaterialGenerationPart } from "./workers-ai-content";
 
 function cloudflareEnv(response: unknown): CloudflareEnv {
   return {
@@ -238,7 +239,7 @@ describe("conteúdo estruturado do Workers AI", () => {
     });
   });
 
-  it("preserva o original sem bloquear a aula quando todos os provedores recusam um trecho", async () => {
+  it("não declara sucesso quando nenhum provedor revisa o trecho", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(new Response("solicitação recusada", { status: 400 }))
@@ -259,17 +260,55 @@ describe("conteúdo estruturado do Workers AI", () => {
         ],
         "contexto"
       )
-    ).resolves.toMatchObject({
-      modelName: "original-preserved-after-provider-failover",
-      data: {
-        segments: [
-          expect.objectContaining({
-            revised_text: "texto ainda não revisado",
-            confidence: 0.5
-          })
-        ]
-      }
+    ).rejects.toMatchObject({
+      code: expect.stringContaining("all_text_providers_failed:"),
+      transient: true
     });
+  });
+
+  it("divide progressivamente um lote estruturalmente inválido até revisar cada segmento", async () => {
+    const env = cloudflareEnv(null);
+    const segments = Array.from({ length: 4 }, (_, index) => ({
+      segment_id: `00000000-0000-4000-8000-${(index + 20).toString().padStart(12, "0")}`,
+      raw_text: `Trecho ${index + 1} para revisão.`,
+      start_ms: index * 1000,
+      end_ms: (index + 1) * 1000
+    }));
+    vi.mocked(env.AI.run).mockImplementation(async (_model, input) => {
+      const message = (input as { messages: Array<{ content: string }> }).messages.at(-1)?.content;
+      const payload = JSON.parse(message ?? "{}") as {
+        segments: Array<{ raw_text: string }>;
+      };
+      if (payload.segments.length > 1) {
+        return {
+          response: {
+            segments: [{ index: 99, revised_text: "Resposta incompleta.", confidence: 0.8 }]
+          }
+        };
+      }
+      return {
+        response: {
+          segments: [
+            {
+              index: 0,
+              revised_text: `${payload.segments[0]!.raw_text} Corrigido pela IA.`,
+              confidence: 0.9
+            }
+          ]
+        }
+      };
+    });
+
+    const result = await reviewWithWorkersAi(env, segments, "contexto");
+
+    expect(env.AI.run).toHaveBeenCalledTimes(7);
+    expect(result.data.segments).toHaveLength(4);
+    expect(result.data.segments.map((segment) => segment.segment_id)).toEqual(
+      segments.map((segment) => segment.segment_id)
+    );
+    expect(
+      result.data.segments.every((segment) => segment.revised_text.includes("Corrigido"))
+    ).toBe(true);
   });
 
   it("recupera revisão com índice inválido usando texto simples", async () => {
@@ -491,5 +530,87 @@ describe("conteúdo estruturado do Workers AI", () => {
       ]
     });
     expect(result.modelName).toBe("ai-composed:@cf/meta/llama-3.1-8b-instruct-fast");
+  });
+
+  it("gera uma parte por execução, reutiliza o checkpoint e conclui sem repetir IA", async () => {
+    const run = vi.fn().mockImplementation(async (_model: string, request: unknown) => {
+      const messages = (request as { messages: Array<{ content: string }> }).messages;
+      const payload = JSON.parse(messages[1]!.content) as {
+        transcript: Array<{ segment_id: string; start_ms: number }>;
+      };
+      const source = payload.transcript[0]!;
+      const partNumber = run.mock.calls.length;
+      return {
+        response: {
+          title: "Apostila com retomada",
+          chronological_index: [`Parte ${partNumber}`],
+          sections: [
+            {
+              title: `Conceitos da parte ${partNumber}`,
+              body: "Este capítulo apresenta os conceitos centrais da aula de modo didático, relacionando definições, mecanismos, consequências e aplicações. A explicação preserva o conteúdo acadêmico relevante, remove repetições da fala e organiza o raciocínio para permitir compreensão e revisão eficiente pelo estudante. ".repeat(
+                3
+              ),
+              timestamp_ms: source.start_ms,
+              source_segment_ids: [source.segment_id]
+            }
+          ],
+          teacher_examples: [],
+          emphasized_points: [`Ênfase da parte ${partNumber}.`],
+          remaining_questions: []
+        }
+      };
+    });
+    const env = {
+      ...cloudflareEnv({}),
+      AI: { run, aiGatewayLogId: null }
+    } as unknown as CloudflareEnv;
+    const twoPartTranscript = Array.from({ length: 2 }, (_, index) => ({
+      segment_id: `00000000-0000-4000-8000-${(index + 40).toString().padStart(12, "0")}`,
+      start_ms: index * 60_000,
+      end_ms: (index + 1) * 60_000,
+      speaker_label: null,
+      text: `Conteúdo acadêmico detalhado da parte ${index + 1}. `.repeat(180)
+    }));
+    let checkpoint: MaterialGenerationPart[] = [];
+
+    const first = await generateWithWorkersAi(
+      env,
+      "notes",
+      twoPartTranscript,
+      { title: "Aula" },
+      {
+        maxNewParts: 1,
+        onCheckpoint: async (parts) => {
+          checkpoint = parts;
+        }
+      }
+    );
+
+    expect(first).toMatchObject({ completed: false, partsCompleted: 1, partsTotal: 2 });
+    expect(checkpoint).toHaveLength(1);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    const second = await generateWithWorkersAi(
+      env,
+      "notes",
+      twoPartTranscript,
+      { title: "Aula" },
+      {
+        completedParts: checkpoint,
+        maxNewParts: 1,
+        onCheckpoint: async (parts) => {
+          checkpoint = parts;
+        }
+      }
+    );
+
+    expect(second.completed).toBe(true);
+    expect(checkpoint).toHaveLength(2);
+    expect(run).toHaveBeenCalledTimes(2);
+    if (second.completed) {
+      expect(second.data).toMatchObject({
+        chronological_index: ["Conceitos da parte 1", "Conceitos da parte 2"]
+      });
+    }
   });
 });

@@ -544,64 +544,38 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     next_job_id?: string | null;
   }> {
     const startedAt = Date.now();
-    try {
-      const result = await reviewWithWorkersAi(
-        this.env,
-        segments,
-        context,
-        activeSegmentReviewModel(this.env)
-      );
-      const applied = applyReviewResultSchema.parse(
-        await this.repository.applyReviewBatch(
-          job.id,
-          result.data.segments.map((segment) => ({ ...segment })),
-          result.modelName ?? activeSegmentReviewModel(this.env),
-          {
-            durationMs: Date.now() - startedAt,
-            inputUnits: result.inputUnits,
-            outputUnits: result.outputUnits,
-            requestId: result.requestId
-          }
-        )
-      );
-      if ("error_code" in applied) rpcFailure(applied.error_code);
-      return applied;
-    } catch (error) {
-      const preserveAndContinue =
-        error instanceof JobProcessingError &&
-        (error.code.startsWith("all_text_providers_failed:") ||
-          [
-            "review_segment_ids_mismatch",
-            "invalid_provider_json",
-            "invalid_provider_schema",
-            "groq_request_too_large",
-            "groq_invalid_request"
-          ].includes(error.code));
-      if (preserveAndContinue) {
-        const preserved = applyReviewResultSchema.parse(
-          await this.repository.applyReviewBatch(
-            job.id,
-            segments.map((segment) => ({
-              segment_id: segment.segment_id,
-              revised_text: segment.raw_text,
-              confidence: 0.5
-            })),
-            "original-preserved-after-provider-failover",
-            { durationMs: Date.now() - startedAt }
-          )
-        );
-        if ("error_code" in preserved) rpcFailure(preserved.error_code);
-        return preserved;
-      }
-      throw error;
-    }
+    const result = await reviewWithWorkersAi(
+      this.env,
+      segments,
+      context,
+      activeSegmentReviewModel(this.env)
+    );
+    const applied = applyReviewResultSchema.parse(
+      await this.repository.applyReviewBatch(
+        job.id,
+        result.data.segments.map((segment) => ({ ...segment })),
+        result.modelName ?? activeSegmentReviewModel(this.env),
+        {
+          durationMs: Date.now() - startedAt,
+          inputUnits: result.inputUnits,
+          outputUnits: result.outputUnits,
+          requestId: result.requestId
+        }
+      )
+    );
+    if ("error_code" in applied) rpcFailure(applied.error_code);
+    return applied;
   }
 
   private async reviewTranscript(job: ProcessingJob) {
     if (job.input_json.phase === "global") return this.reviewWholeTranscript(job);
     let reviewed = 0;
     let needsReview = 0;
-    for (let batchNumber = 0; batchNumber < 10; batchNumber += 1) {
+    // Cada lote consulta provedores externos e persiste o resultado. Muitas
+    // iterações na mesma invocação podem atingir o limite de subrequisições do
+    // Workers e encerrar a execução antes de o lock ser liberado. Duas por
+    // entrega mantêm a revisão fluida; a continuação é reenfileirada logo abaixo.
+    for (let batchNumber = 0; batchNumber < 2; batchNumber += 1) {
       const input = reviewInputSchema.parse(await this.repository.reviewBatch(job.id, 16));
       if ("error_code" in input) rpcFailure(input.error_code);
       if (!input.segments.length) {
@@ -634,27 +608,23 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       };
     }
     const startedAt = Date.now();
-    let result: Awaited<ReturnType<typeof reviewWholeTranscriptWithWorkersAi>> | null = null;
-    let model = activeGenerationModel(this.env);
-    try {
-      result = await reviewWholeTranscriptWithWorkersAi(this.env, input.segments, input.context);
-    } catch (error) {
-      if (!(error instanceof JobProcessingError)) throw error;
-      // A revisão individual por IA já foi persistida em todos os segmentos.
-      // A segunda leitura global é uma melhoria e nunca pode bloquear a entrega.
-      model = "segment-review-validated";
-    }
+    const result = await reviewWholeTranscriptWithWorkersAi(
+      this.env,
+      input.segments,
+      input.context
+    );
+    const model = activeGenerationModel(this.env);
     const applied = applyGlobalReviewResultSchema.parse(
       await this.repository.applyGlobalReview(
         job.id,
-        result?.data.patches.map((patch) => ({ ...patch })) ?? [],
-        result?.data.checked_segments ?? input.segments.length,
+        result.data.patches.map((patch) => ({ ...patch })),
+        result.data.checked_segments,
         model,
         {
           durationMs: Date.now() - startedAt,
-          inputUnits: result?.inputUnits,
-          outputUnits: result?.outputUnits,
-          requestId: result?.requestId
+          inputUnits: result.inputUnits,
+          outputUnits: result.outputUnits,
+          requestId: result.requestId
         }
       )
     );
@@ -663,7 +633,6 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
       output: {
         checked: applied.checked,
         patches_applied: applied.applied,
-        global_review_fallback: result === null,
         transcript_validated: true,
         study_ready: false
       },
@@ -682,12 +651,39 @@ class WorkersAiJobProcessor implements CloudJobProcessor {
     if (input.material_type !== materialType) rpcFailure("invalid_material");
 
     const startedAt = Date.now();
+    const completedParts = Array.isArray(job.output_json.material_parts)
+      ? job.output_json.material_parts
+      : [];
     const generated = await generateWithWorkersAi(
       this.env,
       materialType,
       input.transcript,
-      input.class_context
+      input.class_context,
+      {
+        completedParts,
+        maxNewParts: 1,
+        onCheckpoint: async (materialParts) => {
+          await this.repository.saveProviderState(job.id, {
+            ...job.output_json,
+            material_parts: materialParts,
+            parts_completed: materialParts.length
+          });
+        }
+      }
     );
+    if (!generated.completed) {
+      return {
+        output: {
+          material_id: input.material_id,
+          material_type: materialType,
+          material_parts: generated.completedParts,
+          parts_completed: generated.partsCompleted,
+          parts_total: generated.partsTotal,
+          continuing: true
+        },
+        continueJob: true
+      };
+    }
     const structuredContent = generated.data as Record<string, unknown>;
     const finished = finishMaterialResultSchema.parse(
       await this.repository.finishMaterial(
