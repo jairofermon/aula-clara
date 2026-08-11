@@ -31,7 +31,7 @@ Transformar a transcrição bruta em material de estudo fiel, claro, completo e 
 REGRAS DA TRANSCRIÇÃO
 1. Preserve rigorosamente cada segment_id. Não crie, remova, una, divida nem reordene segmentos.
 2. Corrija pontuação, concordância, falsos inícios, repetições acidentais e erros evidentes de reconhecimento de fala.
-3. Remova somente saudações, chamadas, interrupções e vícios de linguagem sem valor acadêmico. Não resuma nem suprima explicações, exemplos ou ressalvas úteis.
+3. Remova somente saudações, chamadas, interrupções, artefatos isolados e vícios de linguagem sem valor acadêmico. Para isso, preserve o segment_id e o timestamp, use disposition "discard" e revised_text "". Para todo conteúdo acadêmico, use disposition "keep" e revised_text obrigatoriamente preenchido. Nunca descarte explicações, exemplos, ressalvas, definições, números ou termos técnicos.
 4. Use os slides apenas para confirmar grafia, termos e contexto. Não acrescente conteúdo dos slides como se tivesse sido falado.
 5. Não introduza conhecimento externo. Se um trecho continuar incerto, preserve a interpretação mais fiel e escreva [trecho incerto] no revised_text.
 6. confidence deve refletir a segurança da revisão entre 0 e 1.
@@ -45,6 +45,7 @@ MATERIAIS
 
 VALIDAÇÃO ANTES DE ENTREGAR
 - Confirme que os ${segmentCount} segment_id de entrada aparecem uma única vez.
+- Confirme que todo segmento usa disposition "keep" ou "discard"; "keep" exige revised_text preenchido e "discard" exige revised_text vazio.
 - Confirme que todo source_segment_ids pertence à entrada.
 - Confirme que timestamps estão em milissegundos e dentro da duração da aula.
 - Confirme o mínimo de 10 flashcards e 10 questões.
@@ -60,7 +61,7 @@ Crie um arquivo para download chamado aula-clara-resultado.json. Não devolva o 
   "model_name": "modelo realmente utilizado",
   "reasoning_effort": "high | xhigh | max | unknown",
   "transcript": {
-    "segments": [{ "segment_id": "uuid da entrada", "revised_text": "texto", "confidence": 0.95 }]
+    "segments": [{ "segment_id": "uuid da entrada", "revised_text": "texto ou vazio se descartado", "confidence": 0.95, "disposition": "keep | discard" }]
   },
   "materials": {
     "notes": {

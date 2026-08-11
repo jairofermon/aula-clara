@@ -220,29 +220,119 @@ function ContinuousTranscript({
       aria-label="Transcrição contínua"
     >
       <div className="text-[1.02rem] leading-8 text-[#243b35]">
-        {segments.map((segment) => (
-          <span
-            className={
-              segment.id === activeId
-                ? "rounded bg-emerald-100 px-1 shadow-sm"
-                : "transition-colors"
-            }
-            id={`continuous-segment-${segment.id}`}
-            key={segment.id}
-          >
-            <button
-              className="mr-2 inline-flex rounded-md bg-[#edf5f1] px-2 py-0.5 font-mono text-xs font-black text-[#176b58] hover:bg-[#d9ebe4]"
-              onClick={() => onSeek(segment.start_ms)}
-              aria-label={`Ouvir a partir de ${formatTimestamp(segment.start_ms)}`}
+        {segments
+          .filter((segment) => (segment.revised_text ?? segment.raw_text).trim().length > 0)
+          .map((segment) => (
+            <span
+              className={
+                segment.id === activeId
+                  ? "rounded bg-emerald-100 px-1 shadow-sm"
+                  : "transition-colors"
+              }
+              id={`continuous-segment-${segment.id}`}
+              key={segment.id}
             >
-              {formatTimestamp(segment.start_ms)}
-            </button>
-            <span>{segment.revised_text ?? segment.raw_text}</span>{" "}
-          </span>
-        ))}
+              <button
+                className="mr-2 inline-flex rounded-md bg-[#edf5f1] px-2 py-0.5 font-mono text-xs font-black text-[#176b58] hover:bg-[#d9ebe4]"
+                onClick={() => onSeek(segment.start_ms)}
+                aria-label={`Ouvir a partir de ${formatTimestamp(segment.start_ms)}`}
+              >
+                {formatTimestamp(segment.start_ms)}
+              </button>
+              <span>{segment.revised_text ?? segment.raw_text}</span>{" "}
+            </span>
+          ))}
       </div>
     </article>
   );
+}
+
+type PdfGenerationMessage = (message: string) => void;
+
+async function renderTranscriptPdfInBrowser(materialId: string, setMessage: PdfGenerationMessage) {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      setMessage(
+        attempt === 1
+          ? "Gerando o PDF no navegador…"
+          : `Retomando o PDF automaticamente (${attempt}/3)…`
+      );
+      const start = await fetch(`/api/materials/${materialId}/pdf-upload`, { method: "POST" });
+      const startBody = (await start.json()) as {
+        data?: {
+          completed?: boolean;
+          signed_url: string;
+          class_title: string;
+          subject_name: string;
+          class_date: string;
+          transcript_version: number;
+          transcript: Array<{
+            start_ms: number;
+            end_ms: number;
+            speaker_label: string | null;
+            text: string;
+          }>;
+        };
+        error?: { message: string };
+      };
+      if (!start.ok || !startBody.data)
+        throw new Error(startBody.error?.message ?? "Não foi possível preparar o PDF.");
+      if (startBody.data.completed) {
+        setMessage("PDF pronto para download.");
+        return;
+      }
+      const { buildTranscriptPdf } = await import("@/lib/client-pdf");
+      const bytes = await buildTranscriptPdf({
+        classTitle: startBody.data.class_title,
+        subjectName: startBody.data.subject_name,
+        classDate: startBody.data.class_date,
+        transcriptVersion: startBody.data.transcript_version,
+        transcript: startBody.data.transcript
+      });
+      const upload = await fetch(startBody.data.signed_url, {
+        method: "PUT",
+        headers: { "content-type": "application/pdf", "x-upsert": "true" },
+        body: new Blob([Uint8Array.from(bytes)], { type: "application/pdf" })
+      });
+      if (!upload.ok) throw new Error("O PDF não chegou ao armazenamento privado.");
+      const complete = await fetch(`/api/materials/${materialId}/pdf-upload`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "complete" })
+      });
+      if (!complete.ok) throw new Error("Não foi possível confirmar o PDF.");
+      setMessage("PDF pronto para download.");
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Falha ao gerar o PDF.");
+    }
+  }
+  await fetch(`/api/materials/${materialId}/pdf-upload`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "fail" })
+  });
+  throw lastError ?? new Error("Falha ao gerar o PDF.");
+}
+
+async function generateTranscriptPdfForClass(classId: string, setMessage: PdfGenerationMessage) {
+  const response = await fetch(`/api/classes/${classId}/materials`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ material_type: "pdf" })
+  });
+  const body = (await response.json()) as {
+    data?: { id: string; client_generation?: boolean };
+    error?: { message: string };
+  };
+  if (!response.ok || !body.data)
+    throw new Error(body.error?.message ?? "Não foi possível iniciar o PDF.");
+  if (body.data.client_generation) {
+    await renderTranscriptPdfInBrowser(body.data.id, setMessage);
+  } else {
+    setMessage("PDF pronto para download.");
+  }
 }
 
 function ChatgptWorkflow({ classId, hasTranscript }: { classId: string; hasTranscript: boolean }) {
@@ -267,13 +357,33 @@ function ChatgptWorkflow({ classId, hasTranscript }: { classId: string; hasTrans
       method: "POST",
       body: form
     });
-    const body = (await response.json()) as { error?: { message?: string } };
+    const body = (await response.json()) as {
+      error?: {
+        message?: string;
+        details?: Array<{ path?: Array<string | number>; message?: string }>;
+      };
+    };
     if (!response.ok) {
-      setMessage(body.error?.message ?? "O resultado não pôde ser importado.");
+      const detail = body.error?.details?.[0];
+      const detailPath = detail?.path?.length ? `${detail.path.join(".")}: ` : "";
+      setMessage(
+        detail?.message
+          ? `${detailPath}${detail.message}`
+          : (body.error?.message ?? "O resultado não pôde ser importado.")
+      );
       setBusy(false);
       return;
     }
-    setMessage("Resultado importado. Atualizando a aula…");
+    setMessage("Resultado importado. Concluindo o PDF…");
+    try {
+      await generateTranscriptPdfForClass(classId, setMessage);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `Resultado importado. ${error.message}`
+          : "Resultado importado. O PDF poderá ser retomado na aula."
+      );
+    }
     window.location.reload();
   }
 
@@ -402,75 +512,8 @@ function MaterialsPanel({ classId, classTitle }: { classId: string; classTitle: 
     if (response.ok && body.data?.client_generation) {
       const materialId = body.data.id;
       try {
-        let lastError: Error | null = null;
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-          try {
-            setMessage(
-              attempt === 1
-                ? "Gerando o PDF no navegador…"
-                : `Retomando o PDF automaticamente (${attempt}/3)…`
-            );
-            const start = await fetch(`/api/materials/${materialId}/pdf-upload`, {
-              method: "POST"
-            });
-            const startBody = (await start.json()) as {
-              data?: {
-                completed?: boolean;
-                signed_url: string;
-                class_title: string;
-                subject_name: string;
-                class_date: string;
-                transcript_version: number;
-                transcript: Array<{
-                  start_ms: number;
-                  end_ms: number;
-                  speaker_label: string | null;
-                  text: string;
-                }>;
-              };
-              error?: { message: string };
-            };
-            if (!start.ok || !startBody.data)
-              throw new Error(startBody.error?.message ?? "Não foi possível preparar o PDF.");
-            if (startBody.data.completed) {
-              setMessage("PDF pronto para download.");
-              await load();
-              return;
-            }
-            const { buildTranscriptPdf } = await import("@/lib/client-pdf");
-            const bytes = await buildTranscriptPdf({
-              classTitle: startBody.data.class_title,
-              subjectName: startBody.data.subject_name,
-              classDate: startBody.data.class_date,
-              transcriptVersion: startBody.data.transcript_version,
-              transcript: startBody.data.transcript
-            });
-            const upload = await fetch(startBody.data.signed_url, {
-              method: "PUT",
-              headers: { "content-type": "application/pdf", "x-upsert": "true" },
-              body: new Blob([Uint8Array.from(bytes)], { type: "application/pdf" })
-            });
-            if (!upload.ok) throw new Error("O PDF não chegou ao armazenamento privado.");
-            const complete = await fetch(`/api/materials/${materialId}/pdf-upload`, {
-              method: "PATCH",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ action: "complete" })
-            });
-            if (!complete.ok) throw new Error("Não foi possível confirmar o PDF.");
-            setMessage("PDF pronto para download.");
-            lastError = null;
-            break;
-          } catch (error) {
-            lastError = error instanceof Error ? error : new Error("Falha ao gerar o PDF.");
-          }
-        }
-        if (lastError) throw lastError;
+        await renderTranscriptPdfInBrowser(materialId, setMessage);
       } catch (error) {
-        await fetch(`/api/materials/${materialId}/pdf-upload`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action: "fail" })
-        });
         setMessage(error instanceof Error ? error.message : "Falha ao gerar o PDF.");
       }
     } else {
@@ -483,7 +526,10 @@ function MaterialsPanel({ classId, classTitle }: { classId: string; classTitle: 
   async function generateTranscriptPdf() {
     setPackageBusy(true);
     try {
-      await generate("pdf");
+      await generateTranscriptPdfForClass(classId, setMessage);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Falha ao gerar o PDF.");
     } finally {
       setPackageBusy(false);
     }

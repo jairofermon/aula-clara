@@ -14,7 +14,12 @@ type MaterialRow = {
   model_name: string;
 };
 
-async function findMaterialJob(context: ApiContext, materialId: string, ownerUserId: string) {
+async function findMaterialJob(
+  context: ApiContext,
+  materialId: string,
+  ownerUserId: string,
+  idempotencyKey: string
+) {
   const { data } = await context.supabase
     .from("processing_jobs")
     .select("id,status,attempt_count,max_attempts,locked_at")
@@ -23,7 +28,14 @@ async function findMaterialJob(context: ApiContext, materialId: string, ownerUse
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return data;
+  if (data) return data;
+  const { data: canonical } = await context.supabase
+    .from("processing_jobs")
+    .select("id,status,attempt_count,max_attempts,locked_at")
+    .eq("user_id", ownerUserId)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle();
+  return canonical;
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -133,12 +145,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     material = { ...material, status: "pending" };
   }
 
-  let job = await findMaterialJob(context, material.id, klass.user_id);
+  let job = await findMaterialJob(
+    context,
+    material.id,
+    klass.user_id,
+    `${jobType}:${id}:canonical`
+  );
   const now = new Date().toISOString();
   const staleRunning =
     job?.status === "running" &&
     (!job.locked_at || Date.now() - new Date(job.locked_at).getTime() > 120_000);
-  if (job && (["completed", "failed", "retry_wait"].includes(job.status) || staleRunning)) {
+  if (
+    job &&
+    (["completed", "failed", "retry_wait", "cancelled"].includes(job.status) || staleRunning)
+  ) {
     const { error } = await context.supabase
       .from("processing_jobs")
       .update({

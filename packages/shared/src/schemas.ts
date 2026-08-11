@@ -251,10 +251,27 @@ export const notesContentSchema = z
 export const chatgptReviewedSegmentSchema = z
   .object({
     segment_id: uuidSchema,
-    revised_text: z.string().trim().min(1).max(20_000),
-    confidence: z.number().min(0).max(1)
+    revised_text: z.string().trim().max(20_000),
+    confidence: z.number().min(0).max(1),
+    disposition: z.enum(["keep", "discard"]).optional()
   })
-  .strict();
+  .strict()
+  .superRefine((segment, context) => {
+    if (segment.disposition === "keep" && segment.revised_text.length === 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["revised_text"],
+        message: "Segmentos mantidos precisam conter texto revisado"
+      });
+    }
+    if (segment.disposition === "discard" && segment.revised_text.length > 0) {
+      context.addIssue({
+        code: "custom",
+        path: ["revised_text"],
+        message: "Segmentos descartados precisam ter revised_text vazio"
+      });
+    }
+  });
 
 export const chatgptMindmapSchema = z
   .object({

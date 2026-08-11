@@ -117,6 +117,43 @@ describe("pacote manual do ChatGPT", () => {
     });
     expect(result.transcript.segments[0]).not.toHaveProperty("revised_text");
     expect(result.instructions).toContain("todos devem aparecer exatamente uma vez");
+    expect(result.instructions).toContain('disposition "discard"');
+  });
+
+  it("aceita fala descartável sem perder o segmento nem o timestamp", () => {
+    const result = validImport();
+    result.transcript.segments[0] = {
+      segment_id: segmentId,
+      revised_text: "",
+      confidence: 0.99,
+      disposition: "discard"
+    };
+
+    expect(chatgptImportSchema.safeParse(result).success).toBe(true);
+    expect(validateChatgptReferences(result, [segment])).toEqual([]);
+  });
+
+  it("aceita resultado anterior com fala descartável vazia e sem disposition", () => {
+    const result = validImport();
+    result.transcript.segments[0] = {
+      segment_id: segmentId,
+      revised_text: "",
+      confidence: 0.99
+    };
+
+    expect(chatgptImportSchema.safeParse(result).success).toBe(true);
+  });
+
+  it("rejeita segmento marcado para manter quando o texto está vazio", () => {
+    const result = validImport();
+    result.transcript.segments[0] = {
+      segment_id: segmentId,
+      revised_text: "",
+      confidence: 0.99,
+      disposition: "keep"
+    };
+
+    expect(chatgptImportSchema.safeParse(result).success).toBe(false);
   });
 
   it("aceita um resultado completo e rejeita referências de outra aula", () => {
