@@ -6,7 +6,7 @@ export const STATUS_LABELS: Record<ClassStatus, string> = {
   preparing_audio: "Preparando áudio",
   transcribing: "Transcrevendo",
   reviewing: "Corrigindo transcrição",
-  needs_user_review: "Finalizando correção",
+  needs_user_review: "Transcrição bruta pronta",
   generating_materials: "Gerando materiais",
   completed: "Pronta para estudar",
   failed: "Falhou"

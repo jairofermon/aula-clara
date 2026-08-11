@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Pause, Play, RotateCcw, Search } from "lucide-react";
+import { Copy, Download, ExternalLink, Pause, Play, RotateCcw, Search, Upload } from "lucide-react";
 import {
   flashcardsToAnkiCsv,
   formatTimestamp,
@@ -146,7 +146,9 @@ function SegmentCard({
         <p className="mt-2 rounded-lg bg-slate-50 p-3 text-sm leading-6">{segment.raw_text}</p>
       </details>
       <label className="mt-3 block">
-        <span className="label">Transcrição corrigida</span>
+        <span className="label">
+          {segment.revised_text ? "Transcrição corrigida" : "Texto bruto para edição opcional"}
+        </span>
         <textarea
           className="field min-h-24 resize-y leading-6"
           value={text}
@@ -240,6 +242,122 @@ function ContinuousTranscript({
         ))}
       </div>
     </article>
+  );
+}
+
+function ChatgptWorkflow({ classId, hasTranscript }: { classId: string; hasTranscript: boolean }) {
+  const [resultFile, setResultFile] = useState<File | null>(null);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const shortInstruction =
+    "Leia o arquivo do Aula Clara anexado, execute integralmente o campo instructions e entregue o arquivo aula-clara-resultado.json solicitado. Use o PDF anexado apenas como contexto.";
+
+  async function copyInstruction() {
+    await navigator.clipboard.writeText(shortInstruction);
+    setMessage("Instrução copiada.");
+  }
+
+  async function importResult() {
+    if (!resultFile) return;
+    setBusy(true);
+    setMessage("Validando e importando o resultado…");
+    const form = new FormData();
+    form.set("result", resultFile);
+    const response = await fetch(`/api/classes/${classId}/chatgpt-package`, {
+      method: "POST",
+      body: form
+    });
+    const body = (await response.json()) as { error?: { message?: string } };
+    if (!response.ok) {
+      setMessage(body.error?.message ?? "O resultado não pôde ser importado.");
+      setBusy(false);
+      return;
+    }
+    setMessage("Resultado importado. Atualizando a aula…");
+    window.location.reload();
+  }
+
+  return (
+    <section
+      className="card mt-8 border-2 border-[#b9d8cd] p-5 sm:p-7"
+      aria-labelledby="chatgpt-title"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-black uppercase tracking-wide text-[#176b58]">
+            Fluxo recomendado
+          </p>
+          <h2 id="chatgpt-title" className="mt-1 text-2xl font-black">
+            Revisar e criar materiais no ChatGPT
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-[#61736f]">
+            Baixe a transcrição bruta com o prompt mestre, envie o arquivo e os slides ao
+            ChatGPT/Codex e importe o resultado final. Nenhuma API paga é usada pelo Aula Clara.
+          </p>
+        </div>
+        <span className="badge bg-emerald-50 text-emerald-800">Sem custo de API</span>
+      </div>
+      <ol className="mt-5 grid gap-4 text-sm lg:grid-cols-3">
+        <li className="rounded-xl bg-[#edf5f1] p-4">
+          <strong className="block text-base">1. Baixar o pacote</strong>
+          <p className="mt-1 leading-6 text-[#526963]">
+            Contém prompt, metadados, IDs, timestamps e texto bruto.
+          </p>
+          {hasTranscript ? (
+            <a className="btn btn-primary mt-3" href={`/api/classes/${classId}/chatgpt-package`}>
+              <Download size={17} aria-hidden /> Baixar para ChatGPT
+            </a>
+          ) : (
+            <p className="mt-3 font-bold text-amber-800">
+              Disponível assim que a transcrição bruta aparecer.
+            </p>
+          )}
+        </li>
+        <li className="rounded-xl bg-[#edf5f1] p-4">
+          <strong className="block text-base">2. Processar no ChatGPT</strong>
+          <p className="mt-1 leading-6 text-[#526963]">
+            Anexe também o PDF original e use Sol com xhigh ou max.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button className="btn btn-secondary" onClick={() => void copyInstruction()}>
+              <Copy size={17} aria-hidden /> Copiar instrução
+            </button>
+            <a
+              className="btn btn-secondary"
+              href="https://chatgpt.com/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink size={17} aria-hidden /> Abrir ChatGPT
+            </a>
+          </div>
+        </li>
+        <li className="rounded-xl bg-[#edf5f1] p-4">
+          <strong className="block text-base">3. Importar o resultado</strong>
+          <label className="mt-2 block">
+            <span className="sr-only">Resultado JSON do ChatGPT</span>
+            <input
+              className="field text-sm"
+              type="file"
+              accept="application/json,.json"
+              onChange={(event) => setResultFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          <button
+            className="btn btn-primary mt-3"
+            disabled={!resultFile || busy}
+            onClick={() => void importResult()}
+          >
+            <Upload size={17} aria-hidden /> {busy ? "Importando…" : "Importar resultado"}
+          </button>
+        </li>
+      </ol>
+      {message && (
+        <p className="mt-4 text-sm font-bold text-[#176b58]" role="status">
+          {message}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -362,32 +480,12 @@ function MaterialsPanel({ classId, classTitle }: { classId: string; classTitle: 
     }
     await load();
   }
-  async function generateAll() {
+  async function generateTranscriptPdf() {
     setPackageBusy(true);
-    setMessage("Gerando PDF da transcrição e materiais de estudo…");
     try {
-      const requests = ["notes", "summary", "flashcards", "questions", "mindmap"].map(
-        async (material_type) => {
-          const response = await fetch(`/api/classes/${classId}/materials`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ material_type })
-          });
-          if (response.ok) return;
-          const body = (await response.json()) as { error?: { message?: string } };
-          throw new Error(body.error?.message ?? `Falha ao solicitar ${material_type}.`);
-        }
-      );
-      await Promise.all(requests);
       await generate("pdf");
-      setMessage(
-        "Pacote solicitado. O PDF já pode ser baixado e os demais materiais aparecerão assim que ficarem prontos."
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Falha ao gerar o pacote completo.");
     } finally {
       setPackageBusy(false);
-      await load();
     }
   }
   function exportCsv(material: Material) {
@@ -447,7 +545,7 @@ function MaterialsPanel({ classId, classTitle }: { classId: string; classTitle: 
             Materiais de estudo
           </h2>
           <p className="mt-1 text-sm text-[#61736f]">
-            Um clique gera o PDF da transcrição corrigida e todos os materiais de estudo.
+            Importe o resultado do ChatGPT para visualizar e exportar os materiais abaixo.
           </p>
         </div>
         {message && (
@@ -460,9 +558,10 @@ function MaterialsPanel({ classId, classTitle }: { classId: string; classTitle: 
         <button
           className="btn btn-primary"
           disabled={packageBusy}
-          onClick={() => void generateAll()}
+          onClick={() => void generateTranscriptPdf()}
         >
-          {packageBusy ? "Gerando pacote…" : "Gerar pacote completo"}
+          <Download size={17} aria-hidden />
+          {packageBusy ? "Gerando PDF…" : "Gerar PDF da transcrição"}
         </button>
       </div>
       <div className="mt-5 space-y-4">
@@ -577,7 +676,11 @@ export function ClassWorkspace({
       if (response.ok) {
         const body = (await response.json()) as { data: Progress };
         setProgress(body.data);
-        if (body.data.status === "needs_user_review" || body.data.status === "completed")
+        if (
+          ["reviewing", "needs_user_review", "generating_materials", "completed"].includes(
+            body.data.status
+          )
+        )
           await loadSegments();
       }
     };
@@ -615,7 +718,9 @@ export function ClassWorkspace({
     <main className="mx-auto max-w-7xl px-5 py-7">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="font-bold text-[#176b58]">Transcrição corrigida</p>
+          <p className="font-bold text-[#176b58]">
+            {progress.status === "completed" ? "Transcrição revisada" : "Transcrição da aula"}
+          </p>
           <h1 className="mt-1 text-3xl font-black sm:text-4xl">{initialClass.title}</h1>
           <p className="mt-2 text-[#61736f]">{initialClass.topic}</p>
         </div>
@@ -627,7 +732,7 @@ export function ClassWorkspace({
         <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
           <p className="font-black">Pronta para estudar</p>
           <p className="mt-1 text-sm">
-            A transcrição passou pelas duas revisões de IA e o resumo prioritário está disponível.
+            A transcrição revisada e os materiais importados estão disponíveis.
           </p>
         </div>
       )}
@@ -722,8 +827,9 @@ export function ClassWorkspace({
             </div>
           </div>
           <p className="mb-4 text-sm text-[#61736f]">
-            A correção é automática. Use os timestamps para consultar o áudio original quando quiser
-            conferir o contexto.
+            {progress.status === "completed"
+              ? "Resultado revisado importado. Use os timestamps para conferir o áudio original."
+              : "Transcrição bruta disponível. Use os timestamps para conferir o áudio antes ou depois da revisão."}
           </p>
           {filtered.length && transcriptMode === "continuous" ? (
             <ContinuousTranscript segments={filtered} activeId={active?.id} onSeek={seek} />
@@ -781,6 +887,7 @@ export function ClassWorkspace({
           </a>
         </aside>
       </section>
+      <ChatgptWorkflow classId={initialClass.id} hasTranscript={segments.length > 0} />
       <MaterialsPanel classId={initialClass.id} classTitle={initialClass.title} />
     </main>
   );

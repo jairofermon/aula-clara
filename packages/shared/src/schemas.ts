@@ -247,3 +247,45 @@ export const notesContentSchema = z
     remaining_questions: z.array(z.string().trim().min(1))
   })
   .strict();
+
+export const chatgptReviewedSegmentSchema = z
+  .object({
+    segment_id: uuidSchema,
+    revised_text: z.string().trim().min(1).max(20_000),
+    confidence: z.number().min(0).max(1)
+  })
+  .strict();
+
+export const chatgptMindmapSchema = z
+  .object({
+    title: z.string().trim().min(1),
+    root: mindmapNodeSchema
+  })
+  .strict();
+
+export const chatgptImportSchema = z
+  .object({
+    format: z.literal("aula-clara-result"),
+    format_version: z.literal(1),
+    class_id: uuidSchema,
+    transcript_version: z.number().int().positive(),
+    model_name: z.string().trim().min(1).max(120),
+    reasoning_effort: z.enum(["high", "xhigh", "max", "unknown"]),
+    transcript: z.object({ segments: z.array(chatgptReviewedSegmentSchema).min(1) }).strict(),
+    materials: z
+      .object({
+        notes: notesContentSchema,
+        summary: summaryContentSchema,
+        flashcards: flashcardsContentSchema.extend({
+          flashcards: z.array(flashcardSchema).min(10)
+        }),
+        questions: questionsContentSchema.extend({
+          questions: z.array(questionSchema).min(10)
+        }),
+        mindmap: chatgptMindmapSchema
+      })
+      .strict()
+  })
+  .strict();
+
+export type ChatgptImport = z.infer<typeof chatgptImportSchema>;

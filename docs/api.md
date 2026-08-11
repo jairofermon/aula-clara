@@ -61,7 +61,16 @@ Administradores podem criar uma aula própria dentro de qualquer disciplina vis�
 | `PATCH` | `/api/segments/:id`           | `{ revised_text, action }`; action: `save`, `confirm`, `keep_original` ou `accept_suggestion`. |
 | `PATCH` | `/api/issues/:id`             | `{ action: "resolve"                                                                           | "dismiss" }`. |
 
-`raw_text` não é aceito em updates. A web usa a versão corrente corrigida automaticamente; a edição permanece opcional e nunca é exigida para liberar materiais.
+`raw_text` não é aceito em updates. A transcrição bruta fica visível assim que a consolidação termina. A edição manual permanece opcional.
+
+## Pacote ChatGPT/Codex
+
+| Método | Rota                               | Corpo/resultado                                                  |
+| ------ | ---------------------------------- | ---------------------------------------------------------------- |
+| `GET`  | `/api/classes/:id/chatgpt-package` | Baixa JSON com prompt, metadados, timestamps, IDs e texto bruto. |
+| `POST` | `/api/classes/:id/chatgpt-package` | Recebe multipart `result` com `aula-clara-resultado.json`.       |
+
+A importação valida o schema, aula, versão, cobertura dos segmentos, referências, timestamps e quantidades mínimas. Uma RPC PostgreSQL persiste a revisão e os cinco materiais atomicamente. Em qualquer erro, nenhuma parte é salva.
 
 ## Materiais
 
@@ -73,7 +82,7 @@ Administradores podem criar uma aula própria dentro de qualquer disciplina vis�
 | `POST`  | `/api/materials/:id/pdf-upload` | Autoriza a renderização cliente e retorna URL assinada de upload.                       |
 | `PATCH` | `/api/materials/:id/pdf-upload` | Confirma o objeto PDF ou registra falha segura.                                         |
 
-A geração retorna `202`. Um material pendente do mesmo tipo é reutilizado; uma nova versão só nasce após a anterior terminar. O endpoint rejeita transcrição ausente ou segmentos cuja correção automática ainda não terminou.
+A geração automática retorna `202` e permanece como caminho secundário. O PDF pode ser produzido diretamente da transcrição bruta ou revisada. Os demais materiais exigem uma revisão importada ou validada.
 
 O PDF usa diretamente a transcrição corrigida com timestamps e não depende da apostila nem de uma chamada adicional de IA.
 

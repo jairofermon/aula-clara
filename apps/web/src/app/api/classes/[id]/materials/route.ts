@@ -68,7 +68,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .eq("class_id", id)
     .eq("transcript_version", klass.transcript_version)
     .eq("review_status", "unreviewed");
-  if ((unreviewed ?? 0) > 0)
+  if ((unreviewed ?? 0) > 0 && parsed.data.material_type !== "pdf")
     return apiError(
       "A correção automática da transcrição ainda está sendo concluída.",
       409,

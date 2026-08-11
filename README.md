@@ -181,6 +181,7 @@ A lista completa e comentada está em [.env.example](.env.example).
 
 ## Documentação
 
+- [Fluxo gratuito com ChatGPT/Codex](docs/chatgpt-workflow.md)
 - [Arquitetura](docs/architecture.md)
 - [Plano](docs/implementation-plan.md)
 - [Modelo de dados](docs/data-model.md)
