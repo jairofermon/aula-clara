@@ -121,7 +121,7 @@ O roteiro completo, incluindo teste real e solução de erros, está em [docs/de
 ## Limites deliberados da publicação gratuita
 
 - áudio de até 50 MB no Supabase Storage gratuito, enviado pelo protocolo TUS em partes de 6 MB com retomada;
-- slides e materiais complementares limitados a 50 MB por arquivo, o teto do Supabase Free;
+- slides não são enviados ao Aula Clara: anexe o PDF original diretamente ao ChatGPT junto com o PDF da transcrição;
 - sem diarização: falante fica nulo quando o modelo não o identifica;
 - sem FFmpeg no Cloudflare nesta etapa; vídeos/áudios que exijam conversão devem ser convertidos antes do envio;
 - PDF é produzido no navegador, sem Chromium pago no servidor;

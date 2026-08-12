@@ -138,13 +138,11 @@ async function putTusWithProgress(
 export function ClassCreateForm({
   subjects,
   defaultSubject,
-  maxAudioUploadBytes,
-  maxMaterialUploadBytes
+  maxAudioUploadBytes
 }: {
   subjects: Subject[];
   defaultSubject?: string;
   maxAudioUploadBytes: number;
-  maxMaterialUploadBytes: number;
 }) {
   const router = useRouter();
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -153,13 +151,9 @@ export function ClassCreateForm({
   const [message, setMessage] = useState("");
   const [upload, setUpload] = useState<UploadState | null>(null);
 
-  async function sendFile(
-    classId: string,
-    file: File,
-    fileType: "audio" | "slides" | "supplement"
-  ) {
+  async function sendFile(classId: string, file: File) {
     setUpload({ name: file.name, percent: 0, stage: "Validando duração e arquivo…" });
-    const durationMs = fileType === "audio" ? await mediaDurationMs(file) : undefined;
+    const durationMs = await mediaDurationMs(file);
     setUpload({ name: file.name, percent: 0, stage: "Calculando hash com segurança…" });
     const sha256 = await hashFile(file);
     const start = await fetch("/api/uploads/start", {
@@ -172,7 +166,7 @@ export function ClassCreateForm({
         size_bytes: file.size,
         ...(durationMs ? { duration_ms: durationMs } : {}),
         sha256,
-        file_type: fileType
+        file_type: "audio"
       })
     });
     const startPayload = (await start.json()) as {
@@ -219,8 +213,6 @@ export function ClassCreateForm({
     setMessage("");
     const form = new FormData(event.currentTarget);
     const audio = form.get("audio");
-    const slides = form.get("slides");
-    const supplements = form.getAll("supplements");
     if (!(audio instanceof File) || audio.size === 0) {
       setMessage("Selecione um arquivo de áudio.");
       setBusy(false);
@@ -229,23 +221,6 @@ export function ClassCreateForm({
     if (audio.size > maxAudioUploadBytes) {
       setMessage(
         `Na edição gratuita, o áudio deve ter até ${Math.floor(maxAudioUploadBytes / 1024 / 1024)} MB.`
-      );
-      setBusy(false);
-      return;
-    }
-    if (slides instanceof File && slides.size > maxMaterialUploadBytes) {
-      setMessage(
-        `O PDF dos slides deve ter até ${Math.floor(maxMaterialUploadBytes / 1024 / 1024)} MB.`
-      );
-      setBusy(false);
-      return;
-    }
-    const oversizedSupplement = supplements.find(
-      (item) => item instanceof File && item.size > maxMaterialUploadBytes
-    );
-    if (oversizedSupplement instanceof File) {
-      setMessage(
-        `O material “${oversizedSupplement.name}” deve ter até ${Math.floor(maxMaterialUploadBytes / 1024 / 1024)} MB.`
       );
       setBusy(false);
       return;
@@ -274,10 +249,7 @@ export function ClassCreateForm({
       if (!created.ok || !createdPayload.data)
         throw new Error(createdPayload.error?.message ?? "Não foi possível criar a aula.");
       const classId = createdPayload.data.id;
-      await sendFile(classId, audio, "audio");
-      if (slides instanceof File && slides.size > 0) await sendFile(classId, slides, "slides");
-      for (const item of supplements)
-        if (item instanceof File && item.size > 0) await sendFile(classId, item, "supplement");
+      await sendFile(classId, audio);
       const processing = await fetch(`/api/classes/${classId}/process`, { method: "POST" });
       if (!processing.ok) {
         const payload = (await processing.json()) as { error?: { message: string } };
@@ -380,26 +352,6 @@ export function ClassCreateForm({
             <span className="mt-2 block text-xs text-[#61736f]">
               Limite gratuito: {Math.floor(maxAudioUploadBytes / 1024 / 1024)} MB. Envios grandes
               são retomados automaticamente se a conexão oscilar.
-            </span>
-          </label>
-          <label>
-            <span className="label">Slides em PDF</span>
-            <input className="field" type="file" name="slides" accept="application/pdf,.pdf" />
-            <span className="mt-2 block text-xs text-[#61736f]">
-              Até {Math.floor(maxMaterialUploadBytes / 1024 / 1024)} MB.
-            </span>
-          </label>
-          <label>
-            <span className="label">Materiais complementares</span>
-            <input
-              className="field"
-              type="file"
-              name="supplements"
-              multiple
-              accept="application/pdf,.pdf,text/plain"
-            />
-            <span className="mt-2 block text-xs text-[#61736f]">
-              Até {Math.floor(maxMaterialUploadBytes / 1024 / 1024)} MB por arquivo.
             </span>
           </label>
           {upload && (

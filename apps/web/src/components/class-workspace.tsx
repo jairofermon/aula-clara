@@ -686,8 +686,17 @@ export function ClassWorkspace({
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [segments, setSegments] = useState(initialSegments);
+  const initialTranscriptReady = initialClass.transcript_version > 0 && initialSegments.length > 0;
   const [progress, setProgress] = useState<Progress>({
     ...initialClass,
+    ...(initialTranscriptReady
+      ? {
+          status: "completed",
+          progress: 100,
+          current_stage: "Transcrição pronta para download",
+          error_message: null
+        }
+      : {}),
     chunks_completed: 0,
     chunks_total: 0
   });

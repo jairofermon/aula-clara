@@ -11,5 +11,7 @@ describe("entrega simplificada da transcrição", () => {
     expect(CHATGPT_STUDY_PROMPT).toContain("Mapa mental");
     expect(CHATGPT_STUDY_PROMPT).toContain("Resumo explicativo");
     expect(CHATGPT_STUDY_PROMPT).toContain("timestamps");
+    expect(CHATGPT_STUDY_PROMPT).toContain("PDF da transcrição");
+    expect(CHATGPT_STUDY_PROMPT).toContain("PDF dos slides");
   });
 });

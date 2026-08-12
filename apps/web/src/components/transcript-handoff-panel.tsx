@@ -4,7 +4,9 @@ import { useState } from "react";
 import { Copy, Download, ExternalLink } from "lucide-react";
 import type { TranscriptSegment } from "@aula-clara/shared";
 
-export const CHATGPT_STUDY_PROMPT = `Organize o texto do PDF anexado em leitura contínua, mantendo os timestamps junto aos respectivos trechos. Depois, usando exclusivamente o conteúdo da aula, produza:
+export const CHATGPT_STUDY_PROMPT = `Serão anexados dois arquivos: o PDF da transcrição da aula e o PDF dos slides usados pelo professor.
+
+Organize o texto do PDF da transcrição em leitura contínua, mantendo os timestamps junto aos respectivos trechos. Use o PDF dos slides como apoio para compreender o contexto, corrigir termos técnicos e estruturar os assuntos. Depois, usando exclusivamente o conteúdo da aula e dos slides, produza:
 
 1. Questões de múltipla escolha: no mínimo 10, mas quantas forem necessárias para abordar todos os temas que podem cair em prova; cinco alternativas, de A até E; alto nível de elaboração; apenas uma correta; gabarito comentado ao final, justificando a correta e explicando por que as demais estão erradas.
 2. Apostila completa, organizada por assuntos, clara, aprofundada e fiel à aula.

@@ -19,7 +19,7 @@ export default async function NewClassPage({
   if (profile?.role !== "admin") subjectsQuery = subjectsQuery.eq("user_id", user.id);
   const { data } = await subjectsQuery;
   const query = await searchParams;
-  const { maxAudioUploadBytes, maxMaterialUploadBytes } = getServerEnv();
+  const { maxAudioUploadBytes } = getServerEnv();
   return (
     <main className="mx-auto max-w-6xl px-5 py-9">
       <p className="font-bold text-[#176b58]">Nova aula</p>
@@ -33,7 +33,6 @@ export default async function NewClassPage({
           subjects={data}
           defaultSubject={query.subject}
           maxAudioUploadBytes={maxAudioUploadBytes}
-          maxMaterialUploadBytes={maxMaterialUploadBytes}
         />
       ) : (
         <div className="card p-8">Crie uma disciplina antes de cadastrar uma aula.</div>

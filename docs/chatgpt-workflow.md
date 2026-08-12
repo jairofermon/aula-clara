@@ -6,11 +6,11 @@ O Aula Clara é responsável por receber o áudio, transcrever e entregar um PDF
 
 ## Passos
 
-1. Enviar o áudio e, opcionalmente, os slides.
+1. Enviar somente o áudio ao Aula Clara.
 2. Aguardar `Transcrição pronta`.
 3. Abrir a aula e clicar em `Baixar transcrição em PDF`.
 4. Clicar em `Copiar prompt` e em `Abrir ChatGPT`.
-5. Anexar o PDF da transcrição e, quando disponível, o PDF dos slides.
+5. Anexar ao ChatGPT o PDF da transcrição baixado e o PDF original dos slides.
 6. Colar o prompt e usar o modelo e o nível de raciocínio desejados.
 
 ## Conteúdo solicitado pelo prompt
