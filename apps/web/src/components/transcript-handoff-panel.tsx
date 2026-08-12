@@ -4,17 +4,21 @@ import { useState } from "react";
 import { Copy, Download, ExternalLink } from "lucide-react";
 import type { TranscriptSegment } from "@aula-clara/shared";
 
-export const CHATGPT_STUDY_PROMPT = `Serão anexados dois arquivos: o PDF da transcrição da aula e o PDF dos slides usados pelo professor.
+export const CHATGPT_STUDY_PROMPT = `Serão anexados dois arquivos: o PDF da transcrição da aula e provavelmente e não obrigatoriamente o PDF dos slides usados pelo professor.
 
-Organize o texto do PDF da transcrição em leitura contínua, mantendo os timestamps junto aos respectivos trechos. Use o PDF dos slides como apoio para compreender o contexto, corrigir termos técnicos e estruturar os assuntos. Depois, usando exclusivamente o conteúdo da aula e dos slides, produza:
+Organize o texto do PDF da transcrição em leitura contínua, mantendo os timestamps ao lado direito da folha, sem atrapalhar o texto, junto aos respectivos trechos. Use o provável PDF dos slides como apoio para compreender o contexto, corrigir termos técnicos e estruturar os assuntos. Depois, usando exclusivamente o conteúdo da aula, dos slides e de inteligência artificial para melhorar o conteúdo e corrigir possíveis erros, produza:
 
-1. Questões de múltipla escolha: no mínimo 10, mas quantas forem necessárias para abordar todos os temas que podem cair em prova; cinco alternativas, de A até E; alto nível de elaboração; apenas uma correta; gabarito comentado ao final, justificando a correta e explicando por que as demais estão erradas.
-2. Apostila completa, organizada por assuntos, clara, aprofundada e fiel à aula.
-3. Flashcards: no mínimo 10, mas quantos forem necessários para abordar todos os temas que podem cair em prova, sem repetir desnecessariamente as questões.
-4. Mapa mental hierárquico com os conceitos e relações mais importantes.
-5. Resumo explicativo para revisão rápida, destacando conceitos, mecanismos, classificações, exemplos do professor, pegadinhas e pontos importantes para prova.
+Mapa mental hierárquico com os conceitos e relações mais importantes.
 
-Não invente informações. Quando um trecho da transcrição estiver duvidoso, use o contexto da aula e dos slides anexados; se a dúvida permanecer, marque o timestamp para conferência no áudio original.`;
+Resumo explicativo para revisão rápida, destacando conceitos, mecanismos, classificações, exemplos do professor, pegadinhas e pontos importantes para prova.
+
+Apostila completa, organizada por assuntos, clara, aprofundada e fiel à aula.
+
+Flashcards: no mínimo 10, mas quantos forem necessários para abordar todos os temas que podem cair em prova, sem repetir desnecessariamente as questões.
+
+Questões de múltipla escolha: no mínimo 10, mas quantas forem necessárias para abordar todos os temas que podem cair em prova; cinco alternativas, de A até E; alto nível de elaboração; apenas uma correta; gabarito comentado ao final, justificando a correta e explicando por que as demais estão erradas.
+
+Não invente informações, melhore e eleve a qualidade do material com inteligência artificial. Quando um trecho da transcrição estiver duvidoso, use o contexto da aula, dos slides anexados se houver e inteligência artificial em último caso; se a dúvida permanecer, use inteligência artificial para analisar o material como um todo e corrigir o texto, eliminando as dúvidas e deixando o material contínuo, correto e confiável para um excelente estudo, deixando o conteúdo o mais didático possível.`;
 
 function fileSlug(value: string) {
   return value

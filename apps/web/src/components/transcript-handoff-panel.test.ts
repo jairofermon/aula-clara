@@ -13,5 +13,8 @@ describe("entrega simplificada da transcrição", () => {
     expect(CHATGPT_STUDY_PROMPT).toContain("timestamps");
     expect(CHATGPT_STUDY_PROMPT).toContain("PDF da transcrição");
     expect(CHATGPT_STUDY_PROMPT).toContain("PDF dos slides");
+    expect(CHATGPT_STUDY_PROMPT).toContain("provavelmente e não obrigatoriamente");
+    expect(CHATGPT_STUDY_PROMPT).toContain("ao lado direito da folha");
+    expect(CHATGPT_STUDY_PROMPT).toContain("inteligência artificial");
   });
 });
