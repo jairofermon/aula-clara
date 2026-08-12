@@ -1,18 +1,18 @@
 # Aula Clara
 
-Vertical funcional web para transformar uma aula gravada em transcrição corrigida automaticamente, apostila, resumo, flashcards, questões, mapa mental e PDF.
+Vertical funcional web para transformar uma aula gravada em transcrição integral com timestamps e PDF. O material de estudo é produzido no ChatGPT pelo usuário, com um prompt pronto no próprio Aula Clara.
 
 O caminho principal de publicação não exige servidor local nem OpenAI API paga:
 
 ```text
 Navegador → Cloudflare Workers/OpenNext → Supabase Auth/PostgreSQL/Storage
                               ↓
-             Cloudflare Queue + roteador de provedores
+             Cloudflare Queue + roteador de transcrição
                               ↓
-           transcrição, revisão e materiais persistidos
+             transcrição com timestamps persistida
 ```
 
-A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui créditos da OpenAI API. O caminho gratuito usa Cerebras, Groq e Workers AI, com AssemblyAI, Deepgram, Gemini e OpenRouter como reservas; `OPENAI_API_KEY` permanece opcional e exclusiva do worker Python local.
+A assinatura ChatGPT Plus não é usada como API. O Aula Clara termina a transcrição e gera o PDF no navegador; depois o usuário anexa esse PDF ao ChatGPT e usa o prompt fornecido, sem custo adicional de API no sistema.
 
 ## O que já funciona
 
@@ -20,10 +20,10 @@ A assinatura ChatGPT Plus ajuda a desenvolver o projeto, mas não inclui crédit
 - disciplinas, aulas e uploads privados por URL assinada;
 - hash SHA-256, validação de MIME/extensão/tamanho e deduplicação;
 - fila persistida no PostgreSQL, entrega por Cloudflare Queue e recuperação por cron;
-- transcrição com timestamps numéricos, compactação de microsegmentos e correção automática;
+- transcrição integral com timestamps numéricos e failover entre provedores de áudio;
 - player sincronizado, busca e edição opcional com proteção contra perda;
-- apostila, resumo, flashcards/CSV, questões e mapa mental;
-- pacote completo em um clique e PDF da transcrição gerado no navegador;
+- PDF da transcrição gerado e baixado diretamente no navegador, sem fila;
+- prompt pronto para gerar no ChatGPT questões, apostila, flashcards, mapa mental e resumo;
 - URLs de download de curta duração, diagnóstico, auditoria e logs sem conteúdo integral;
 - provider falso determinístico para testes e worker Python/FFmpeg como caminho local opcional.
 

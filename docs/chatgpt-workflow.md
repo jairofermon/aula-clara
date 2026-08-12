@@ -1,34 +1,31 @@
-# Fluxo manual com ChatGPT/Codex
+# Fluxo simples com ChatGPT
 
 ## Objetivo
 
-O fluxo principal gratuito encerra o processamento automático quando a transcrição bruta com timestamps está consolidada. A revisão profunda e a criação dos materiais são realizadas de forma interativa no ChatGPT ou Codex, sem usar a API paga da OpenAI.
+O Aula Clara é responsável por receber o áudio, transcrever e entregar um PDF integral com timestamps. Revisão editorial e materiais de estudo são feitos pelo usuário no ChatGPT, sem API paga dentro do sistema.
 
-## Passos do usuário
+## Passos
 
-1. Enviar o áudio e, opcionalmente, slides e materiais complementares.
-2. Aguardar a mensagem `Transcrição bruta pronta para o ChatGPT`.
-3. Abrir a aula e baixar o arquivo `aula-clara-*-chatgpt.json`.
-4. Anexar esse JSON e os PDFs originais ao ChatGPT/Codex.
-5. Usar GPT-5.6 Sol com esforço `xhigh` ou `max` e pedir para executar integralmente o campo `instructions`.
-6. Baixar `aula-clara-resultado.json` produzido pelo modelo.
-7. Importar o resultado na mesma aula.
+1. Enviar o áudio e, opcionalmente, os slides.
+2. Aguardar `Transcrição pronta`.
+3. Abrir a aula e clicar em `Baixar transcrição em PDF`.
+4. Clicar em `Copiar prompt` e em `Abrir ChatGPT`.
+5. Anexar o PDF da transcrição e, quando disponível, o PDF dos slides.
+6. Colar o prompt e usar o modelo e o nível de raciocínio desejados.
 
-## Garantias da importação
+## Conteúdo solicitado pelo prompt
 
-- formato validado com Zod;
-- aula e versão da transcrição precisam coincidir;
-- todos os segmentos precisam aparecer exatamente uma vez;
-- `raw_text` nunca é alterado;
-- IDs citados nos materiais precisam existir na aula;
-- timestamps precisam estar dentro da duração transcrita;
-- no mínimo 10 flashcards e 10 questões;
-- cinco alternativas e exatamente uma correta por questão;
-- mapa mental Mermaid é construído localmente a partir da árvore validada;
-- transcrição, materiais, status, uso e auditoria são persistidos em uma transação PostgreSQL.
+- organização da transcrição em leitura contínua, mantendo timestamps;
+- questões avançadas com alternativas de A a E e gabarito comentado;
+- apostila completa;
+- flashcards suficientes para cobrir os temas de prova;
+- mapa mental;
+- resumo explicativo e orientado para revisão.
 
-Se alguma validação falhar, nada é importado parcialmente. O arquivo precisa ser corrigido ou recriado.
+## Garantias do Aula Clara
 
-## Limite deliberado
-
-A assinatura do ChatGPT/Codex não é usada como credencial de API pelo Aula Clara. A transferência dos dois arquivos é manual. Isso mantém o fluxo sem custo adicional de API e impede que a indisponibilidade de provedores gratuitos bloqueie a transcrição.
+- `raw_text` e timestamps permanecem preservados;
+- o PDF é criado localmente no navegador, sem job de servidor;
+- nenhuma etapa de revisão ou geração de material pode prender o processamento;
+- as chamadas de IA do ChatGPT acontecem somente na conversa do usuário;
+- o fluxo não exige chave da OpenAI API.

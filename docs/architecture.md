@@ -28,7 +28,7 @@ opcional. A decisão completa está em
 
 ## Objetivo
 
-A primeira vertical do Aula Clara transforma áudio de aula e materiais opcionais em uma transcrição corrigida automaticamente e em materiais de estudo. O desenho privilegia persistência, retomada e segurança por proprietário. O desenvolvimento local continua disponível, mas não é requisito para o usuário final.
+A primeira vertical do Aula Clara transforma áudio de aula em uma transcrição integral com timestamps e PDF. O usuário leva o PDF ao ChatGPT com um prompt pronto para revisão e materiais de estudo. O desenho privilegia persistência, retomada e segurança por proprietário.
 
 ## Componentes
 
@@ -51,7 +51,7 @@ Worker Python/FastAPI
   ├─ FFmpeg/ffprobe
   ├─ OpenAITranscriptionProvider ou FakeTranscriptionProvider
   ├─ revisão e geração estruturadas
-  └─ HTML + Playwright → PDF → Storage
+  └─ pdf-lib no navegador → download local
 ```
 
 ## Fronteiras de confiança
@@ -74,7 +74,7 @@ Worker Python/FastAPI
 7. `assemble_transcript` ordena e remove somente duplicações sustentadas pela janela de sobreposição.
 8. A versão original permanece imutável; aulas com muitos microsegmentos ganham uma versão compacta e `review_transcript` escreve a correção final em `revised_text`.
 9. Materiais são jobs independentes e versionados. Cada um usa o texto efetivo validado (`revised_text`/confirmado; nunca substitui o bruto).
-10. Na web gratuita, `generate_pdf` monta o PDF da transcrição corrigida no navegador e o armazena no bucket privado.
+10. Na web gratuita, o navegador monta e baixa o PDF diretamente, sem criar `generate_pdf`.
 
 ## Estratégia de retomada
 
@@ -91,8 +91,8 @@ O MVP usa polling a cada 2–4 segundos. O progresso é derivado de fatos persis
 
 - preparação: marcos validados do ffprobe/chunking;
 - transcrição: chunks concluídos / chunks totais;
-- revisão e materiais: lotes ou artefatos concluídos / total;
-- PDF: conteúdo, renderização e upload.
+- transcrição: chunks persistidos / total;
+- PDF: geração local iniciada explicitamente pelo usuário, fora da fila.
 
 Não há percentuais baseados apenas em tempo decorrido.
 

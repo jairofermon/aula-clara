@@ -21,7 +21,7 @@ describe("PDF da transcrição no navegador", () => {
     expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe("%PDF");
     const document = await PDFDocument.load(bytes);
     expect(document.getPageCount()).toBeGreaterThanOrEqual(2);
-    expect(document.getTitle()).toBe("Introdução à fisiologia - Transcrição corrigida");
+    expect(document.getTitle()).toBe("Introdução à fisiologia - Transcrição completa");
   });
 
   it("exporta um material de estudo paginado", async () => {

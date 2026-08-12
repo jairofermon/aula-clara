@@ -13,6 +13,9 @@ import { ProgressBar } from "@/components/progress-bar";
 import { MaterialContent, materialToText } from "@/components/material-content";
 import { STATUS_LABELS, statusTone } from "@/lib/status";
 import { seekAudio } from "@/lib/player";
+import { TranscriptHandoffPanel } from "@/components/transcript-handoff-panel";
+
+const LEGACY_STUDY_WORKFLOW_ENABLED = false;
 
 interface ClassInfo {
   id: string;
@@ -27,6 +30,9 @@ interface ClassInfo {
   processing_started_at?: string | null;
   target_ready_at?: string | null;
   study_ready_at?: string | null;
+  subject_name: string;
+  class_date: string;
+  transcript_version: number;
 }
 interface Material {
   id: string;
@@ -765,7 +771,7 @@ export function ClassWorkspace({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="font-bold text-[#176b58]">
-            {progress.status === "completed" ? "Transcrição revisada" : "Transcrição da aula"}
+            {progress.status === "completed" ? "Transcrição pronta" : "Transcrição da aula"}
           </p>
           <h1 className="mt-1 text-3xl font-black sm:text-4xl">{initialClass.title}</h1>
           <p className="mt-2 text-[#61736f]">{initialClass.topic}</p>
@@ -776,9 +782,9 @@ export function ClassWorkspace({
       </div>
       {progress.study_ready_at && (
         <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
-          <p className="font-black">Pronta para estudar</p>
+          <p className="font-black">Transcrição pronta</p>
           <p className="mt-1 text-sm">
-            A transcrição revisada e os materiais importados estão disponíveis.
+            Baixe o PDF abaixo e use o prompt pronto para gerar os materiais no ChatGPT.
           </p>
         </div>
       )}
@@ -873,9 +879,7 @@ export function ClassWorkspace({
             </div>
           </div>
           <p className="mb-4 text-sm text-[#61736f]">
-            {progress.status === "completed"
-              ? "Resultado revisado importado. Use os timestamps para conferir o áudio original."
-              : "Transcrição bruta disponível. Use os timestamps para conferir o áudio antes ou depois da revisão."}
+            A transcrição está disponível com timestamps para consulta no áudio original.
           </p>
           {filtered.length && transcriptMode === "continuous" ? (
             <ContinuousTranscript segments={filtered} activeId={active?.id} onSeek={seek} />
@@ -895,7 +899,7 @@ export function ClassWorkspace({
           )}
         </div>
         <aside className="card h-fit p-5">
-          <h2 className="font-black">Processamento</h2>
+          <h2 className="font-black">Transcrição</h2>
           <div className="mt-4">
             <ProgressBar
               value={progress.progress}
@@ -933,8 +937,19 @@ export function ClassWorkspace({
           </a>
         </aside>
       </section>
-      <ChatgptWorkflow classId={initialClass.id} hasTranscript={segments.length > 0} />
-      <MaterialsPanel classId={initialClass.id} classTitle={initialClass.title} />
+      <TranscriptHandoffPanel
+        classTitle={initialClass.title}
+        subjectName={initialClass.subject_name}
+        classDate={initialClass.class_date}
+        transcriptVersion={initialClass.transcript_version}
+        segments={segments}
+      />
+      {LEGACY_STUDY_WORKFLOW_ENABLED && (
+        <>
+          <ChatgptWorkflow classId={initialClass.id} hasTranscript={segments.length > 0} />
+          <MaterialsPanel classId={initialClass.id} classTitle={initialClass.title} />
+        </>
+      )}
     </main>
   );
 }

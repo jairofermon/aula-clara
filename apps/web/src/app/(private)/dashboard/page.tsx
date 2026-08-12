@@ -48,9 +48,9 @@ export default async function DashboardPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="font-bold text-[#176b58]">Seu espaço de estudo</p>
-          <h1 className="mt-1 text-4xl font-black tracking-tight">Aulas em andamento</h1>
+          <h1 className="mt-1 text-4xl font-black tracking-tight">Suas aulas</h1>
           <p className="mt-2 text-[#61736f]">
-            Progresso baseado em etapas e blocos realmente concluídos.
+            Envie o áudio, acompanhe a transcrição e baixe o PDF para estudar no ChatGPT.
           </p>
         </div>
         <Link href="/classes/new" className="btn btn-primary">
@@ -135,7 +135,7 @@ export default async function DashboardPage() {
                   )}
                   <div className="mt-5 flex flex-wrap gap-2">
                     <Link className="btn btn-primary" href={`/classes/${item.id}/transcript`}>
-                      {status === "needs_user_review" ? "Revisar" : "Abrir aula"}
+                      Abrir aula
                     </Link>
                     <Link className="btn btn-secondary" href={`/classes/${item.id}/diagnostics`}>
                       Diagnóstico

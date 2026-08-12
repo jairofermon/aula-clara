@@ -9,13 +9,14 @@ export default async function TranscriptPage({ params }: { params: Promise<{ id:
   const { data: klass } = await supabase
     .from("classes")
     .select(
-      "id,title,topic,status,progress,current_stage,error_message,transcript_version,processing_priority,processing_started_at,target_ready_at,study_ready_at"
+      "id,subject_id,title,topic,class_date,status,progress,current_stage,error_message,transcript_version,processing_priority,processing_started_at,target_ready_at,study_ready_at"
     )
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
   if (!klass) notFound();
-  const [{ data: files }, { data: segments }] = await Promise.all([
+  const [{ data: subject }, { data: files }, { data: segments }] = await Promise.all([
+    supabase.from("subjects").select("name").eq("id", klass.subject_id).maybeSingle(),
     supabase
       .from("class_files")
       .select("duration_ms")
@@ -37,6 +38,7 @@ export default async function TranscriptPage({ params }: { params: Promise<{ id:
       initialClass={{
         ...klass,
         status: klass.status as ClassStatus,
+        subject_name: subject?.name ?? "Disciplina não informada",
         duration_ms: files?.[0]?.duration_ms ?? null
       }}
       initialSegments={(segments ?? []) as TranscriptSegment[]}

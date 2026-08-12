@@ -149,12 +149,12 @@ export async function buildTranscriptPdf(input: TranscriptPdfInput): Promise<Uin
     y -= 5;
   }
   newContentPage();
-  heading("Transcrição completa e corrigida", 21);
+  heading("Transcrição completa", 21);
   paragraph("Os horários abaixo permitem localizar cada trecho diretamente no áudio original.", 10);
 
   for (const segment of input.transcript) {
     ensureSpace(42);
-    const interval = `${formatTimestamp(segment.start_ms)} – ${formatTimestamp(segment.end_ms)}`;
+    const interval = `${formatTimestamp(segment.start_ms)} - ${formatTimestamp(segment.end_ms)}`;
     const speaker = segment.speaker_label ? ` · ${segment.speaker_label}` : "";
     page.drawText(safePdfText(`${interval}${speaker}`), {
       x: MARGIN,
@@ -184,7 +184,7 @@ export async function buildTranscriptPdf(input: TranscriptPdfInput): Promise<Uin
     );
   });
 
-  document.setTitle(safePdfText(`${input.classTitle} - Transcrição corrigida`));
+  document.setTitle(safePdfText(`${input.classTitle} - Transcrição completa`));
   document.setSubject(safePdfText(input.subjectName));
   document.setProducer("Aula Clara - pdf-lib");
   return document.save();

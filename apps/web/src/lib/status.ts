@@ -6,15 +6,15 @@ export const STATUS_LABELS: Record<ClassStatus, string> = {
   preparing_audio: "Preparando áudio",
   transcribing: "Transcrevendo",
   reviewing: "Corrigindo transcrição",
-  needs_user_review: "Transcrição bruta pronta",
-  generating_materials: "Gerando materiais",
-  completed: "Pronta para estudar",
+  needs_user_review: "Transcrição pronta",
+  generating_materials: "Finalizando transcrição",
+  completed: "Transcrição pronta",
   failed: "Falhou"
 };
 
 export function statusTone(status: ClassStatus) {
   if (status === "failed") return "bg-red-100 text-red-800";
-  if (status === "completed") return "bg-emerald-100 text-emerald-800";
-  if (status === "needs_user_review") return "bg-amber-100 text-amber-900";
+  if (status === "completed" || status === "needs_user_review")
+    return "bg-emerald-100 text-emerald-800";
   return "bg-sky-100 text-sky-800";
 }
