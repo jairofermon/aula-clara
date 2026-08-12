@@ -906,7 +906,7 @@ export function ClassWorkspace({
               label={progress.current_stage ?? STATUS_LABELS[progress.status]}
             />
           </div>
-          {progress.chunks_total > 0 && (
+          {progress.status !== "completed" && progress.chunks_total > 0 && (
             <p className="mt-3 text-sm text-[#61736f]">
               {progress.chunks_completed} de {progress.chunks_total} blocos concluídos
             </p>
