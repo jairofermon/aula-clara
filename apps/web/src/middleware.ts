@@ -4,6 +4,9 @@ import { type NextRequest, NextResponse } from "next/server";
 // Next.js 16 proxy.ts is Node-only. OpenNext ainda exige a fronteira Edge,
 // portanto mantemos deliberadamente a convenção middleware.ts suportada.
 export async function middleware(request: NextRequest) {
+  // A autenticação de páginas públicas e APIs é feita pelos respectivos
+  // componentes/handlers. Não inicialize o cliente Supabase nessas rotas:
+  // no Workers Free, cada requisição HTTP dispõe de apenas 10 ms de CPU.
   let response = NextResponse.next({ request });
   const url = process.env.SUPABASE_INTERNAL_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -21,11 +24,7 @@ export async function middleware(request: NextRequest) {
   });
 
   const { data } = await supabase.auth.getUser();
-  const isPrivate =
-    request.nextUrl.pathname.startsWith("/dashboard") ||
-    request.nextUrl.pathname.startsWith("/subjects") ||
-    request.nextUrl.pathname.startsWith("/classes");
-  if (isPrivate && !data.user) {
+  if (!data.user) {
     const login = request.nextUrl.clone();
     login.pathname = "/login";
     login.searchParams.set("next", request.nextUrl.pathname);
@@ -34,4 +33,6 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
-export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
+export const config = {
+  matcher: ["/dashboard/:path*", "/subjects/:path*", "/classes/:path*", "/admin/:path*"]
+};

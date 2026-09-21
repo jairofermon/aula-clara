@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
-export async function requireUser(): Promise<User> {
+export const requireUser = cache(async (): Promise<User> => {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) redirect("/login");
@@ -13,7 +14,7 @@ export async function requireUser(): Promise<User> {
     .single();
   if (profile?.approval_status !== "approved") redirect("/pending-approval");
   return data.user;
-}
+});
 
 export async function requireAdmin(): Promise<User> {
   const user = await requireUser();
