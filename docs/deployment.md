@@ -36,7 +36,7 @@ Consulte [ADR 0007](decisions/0007-free-cloud-deployment.md) antes de mudar a to
 ## Pré-requisitos
 
 - repositório GitHub `jairofermon/aula-clara`;
-- projeto Supabase `rctuenfnwlzmmpyjzhmq`, região São Paulo;
+- projeto Supabase `neqyhozcnxvkosavpkoj`, região `us-east-1`;
 - conta Cloudflare gratuita com Workers AI e Queues disponíveis;
 - Node.js 22 e pnpm 10.15.1 no computador usado apenas para publicar.
 
@@ -48,7 +48,7 @@ Autentique a CLI e aplique as migrations:
 
 ```powershell
 pnpm exec supabase login
-pnpm exec supabase link --project-ref rctuenfnwlzmmpyjzhmq
+pnpm exec supabase link --project-ref neqyhozcnxvkosavpkoj
 pnpm exec supabase db push
 ```
 
@@ -96,7 +96,7 @@ Crie `apps/web/.env.production.local`:
 
 ```text
 NEXT_PUBLIC_APP_URL=https://aula-clara.<subdominio>.workers.dev
-NEXT_PUBLIC_SUPABASE_URL=https://rctuenfnwlzmmpyjzhmq.supabase.co
+NEXT_PUBLIC_SUPABASE_URL=https://neqyhozcnxvkosavpkoj.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<chave-publicável>
 PROCESSING_DISPATCH_MODE=cloudflare
 MAX_AUDIO_UPLOAD_SIZE_MB=50

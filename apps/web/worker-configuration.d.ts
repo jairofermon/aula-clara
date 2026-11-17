@@ -5,7 +5,7 @@ interface __BaseEnv_CloudflareEnv {
 	PROCESSING_QUEUE: Queue;
 	AI: Ai;
 	ASSETS: Fetcher;
-	SUPABASE_URL: "https://rctuenfnwlzmmpyjzhmq.supabase.co";
+	SUPABASE_URL: "https://neqyhozcnxvkosavpkoj.supabase.co";
 	PROCESSING_DISPATCH_MODE: "cloudflare";
 	WORKER_ID: "aula-clara-cloudflare-v2";
 	WORKER_LOCK_TTL_SECONDS: "120";

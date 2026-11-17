@@ -54,11 +54,11 @@ pnpm install --frozen-lockfile
 
 ### 2. Vincular e migrar o Supabase
 
-O projeto informado usa o ref `rctuenfnwlzmmpyjzhmq` na região São Paulo.
+O projeto de produção usa o ref `neqyhozcnxvkosavpkoj` na região `us-east-1`.
 
 ```powershell
 pnpm exec supabase login
-pnpm exec supabase link --project-ref rctuenfnwlzmmpyjzhmq
+pnpm exec supabase link --project-ref neqyhozcnxvkosavpkoj
 pnpm exec supabase db push
 ```
 
@@ -86,7 +86,7 @@ Crie `apps/web/.env.production.local` — arquivo ignorado pelo Git:
 
 ```text
 NEXT_PUBLIC_APP_URL=https://aula-clara.<sua-conta>.workers.dev
-NEXT_PUBLIC_SUPABASE_URL=https://rctuenfnwlzmmpyjzhmq.supabase.co
+NEXT_PUBLIC_SUPABASE_URL=https://neqyhozcnxvkosavpkoj.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<chave pública do Supabase>
 PROCESSING_DISPATCH_MODE=cloudflare
 MAX_AUDIO_UPLOAD_SIZE_MB=50
